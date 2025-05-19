@@ -33,7 +33,7 @@ This workshop provides a hands-on experience for optimizing machine learning mod
 
 2. Clone this repository to your SageMaker notebook instance:
    ```bash
-   git clone https://github.com/your-repo/model-optimization-workshop.git
+   git clone https://github.com/SaRedfiche/model-optimization-workshop.git
    cd model-optimization-workshop
    ```
 
@@ -50,7 +50,7 @@ If you prefer to run the workshop locally:
 
 1. Clone this repository:
    ```bash
-   git clone https://github.com/your-repo/model-optimization-workshop.git
+   git clone https://github.com/SaRedfiche/model-optimization-workshop.git
    cd model-optimization-workshop
    ```
 
