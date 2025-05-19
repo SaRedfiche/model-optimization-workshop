@@ -27,9 +27,14 @@ This workshop provides a hands-on experience for optimizing machine learning mod
 ### SageMaker Setup
 
 1. Launch a SageMaker notebook instance with the following specifications:
-   - Instance type: ml.t3.xlarge or larger
+   - Instance type: ml.t3.xlarge (minimum) or ml.g4dn.xlarge (recommended for GPU acceleration)
    - Use the standard ML AMI provided by SageMaker
    - Attach an IAM role with the necessary permissions (see `sagemaker_permissions.md`)
+
+   **Recommended Instance Types:**
+   - **ml.t3.xlarge**: Good for initial notebooks and smaller models (4 vCPUs, 16 GB memory)
+   - **ml.g4dn.xlarge**: Better for optimization tasks with GPU acceleration (4 vCPUs, 16 GB memory, 1 NVIDIA T4 GPU)
+   - **ml.g4dn.2xlarge**: For working with multiple large models (8 vCPUs, 32 GB memory, 1 NVIDIA T4 GPU)
 
 2. Clone this repository to your SageMaker notebook instance:
    ```bash
