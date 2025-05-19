@@ -1,0 +1,15 @@
+torch>=1.13.0
+torchvision>=0.14.0
+torchaudio>=0.13.0
+transformers>=4.26.0
+datasets>=2.10.0
+boto3>=1.26.0
+sagemaker>=2.130.0
+optimum>=1.8.0
+matplotlib>=3.6.0
+seaborn>=0.12.0
+pandas>=1.5.0
+psutil>=5.9.0
+py-cpuinfo>=9.0.0
+accelerate>=0.18.0
+scikit-learn>=1.2.0

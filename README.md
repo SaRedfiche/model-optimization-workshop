@@ -1,0 +1,85 @@
+# Model Optimization Workshop
+
+This workshop provides a hands-on experience for optimizing machine learning models to improve performance and reduce costs. You'll learn various optimization techniques including quantization, pruning, and knowledge distillation.
+
+## Workshop Structure
+
+1. **Introduction** - Overview of model optimization techniques
+2. **Environment Setup** - Setting up the SageMaker environment
+3. **Model Selection** - Downloading models from Hugging Face
+4. **Baseline Evaluation** - Measuring baseline performance metrics
+5. **Quantization** - Applying quantization techniques
+6. **Pruning** - Implementing pruning techniques
+7. **Knowledge Distillation** - Creating smaller student models
+8. **Model Hosting** - Deploying models to AWS SageMaker
+9. **Inference Performance** - Comparing inference performance across models
+10. **Cost Analysis** - Analyzing cost implications and ROI
+11. **Resource Cleanup** - Cleaning up AWS resources
+
+## Prerequisites
+
+- AWS account with access to SageMaker
+- Basic understanding of machine learning and deep learning concepts
+- Familiarity with Python and PyTorch
+
+## Setup Instructions
+
+### SageMaker Setup
+
+1. Launch a SageMaker notebook instance with the following specifications:
+   - Instance type: ml.t3.xlarge or larger
+   - Use the standard ML AMI provided by SageMaker
+   - Attach an IAM role with the necessary permissions (see `sagemaker_permissions.md`)
+
+2. Clone this repository to your SageMaker notebook instance:
+   ```bash
+   git clone https://github.com/your-repo/model-optimization-workshop.git
+   cd model-optimization-workshop
+   ```
+
+3. Install the required packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Open the first notebook `01_introduction.ipynb` and follow the instructions.
+
+### Local Setup (Alternative)
+
+If you prefer to run the workshop locally:
+
+1. Clone this repository:
+   ```bash
+   git clone https://github.com/your-repo/model-optimization-workshop.git
+   cd model-optimization-workshop
+   ```
+
+2. Create and activate a virtual environment:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. Install the required packages:
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+4. Configure AWS credentials:
+   ```bash
+   aws configure
+   ```
+
+5. Open the first notebook `01_introduction.ipynb` and follow the instructions.
+
+## Documentation
+
+- `sagemaker_permissions.md` - Details on the required IAM permissions
+- `model_optimization_techniques.md` - Overview of model optimization techniques
+- `quantization_deep_dive.md` - Detailed explanation of quantization methods
+- `pruning_techniques.md` - Detailed explanation of pruning techniques
+- `cost_estimation_for_model_optimization.md` - Guide to estimating cost savings
+
+## License
+
+This workshop is licensed under the MIT License - see the LICENSE file for details.
