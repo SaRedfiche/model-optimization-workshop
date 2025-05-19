@@ -4,17 +4,15 @@ This workshop provides a hands-on experience for optimizing machine learning mod
 
 ## Workshop Structure
 
-1. **Introduction** - Overview of model optimization techniques
-2. **Environment Setup** - Setting up the SageMaker environment
-3. **Model Selection** - Downloading models from Hugging Face
-4. **Baseline Evaluation** - Measuring baseline performance metrics
-5. **Quantization** - Applying quantization techniques
-6. **Pruning** - Implementing pruning techniques
-7. **Knowledge Distillation** - Creating smaller student models
-8. **Model Hosting** - Deploying models to AWS SageMaker
-9. **Inference Performance** - Comparing inference performance across models
-10. **Cost Analysis** - Analyzing cost implications and ROI
-11. **Resource Cleanup** - Cleaning up AWS resources
+1. **Introduction and Setup** - Environment setup and model download
+2. **Baseline Evaluation** - Measuring baseline performance metrics
+3. **Quantization** - Applying quantization techniques
+4. **Pruning** - Implementing pruning techniques
+5. **Knowledge Distillation** - Creating smaller student models
+6. **Model Hosting** - Deploying models to AWS SageMaker
+7. **Inference Performance** - Comparing inference performance across models
+8. **Cost Analysis** - Analyzing cost implications and ROI
+9. **Resource Cleanup** - Cleaning up AWS resources
 
 ## Prerequisites
 
