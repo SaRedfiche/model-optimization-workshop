@@ -8,7 +8,7 @@ The CloudFormation template creates the following resources:
 
 1. **S3 Bucket** - For storing models, scripts, and optimization outputs
 2. **IAM Role** - With permissions for SageMaker and S3 access
-3. **SageMaker Notebook Instance** - Pre-configured with the workshop code
+3. **SageMaker Notebook Instance** - Pre-configured with workshop configuration
 4. **Lifecycle Configuration** - To set up the notebook environment automatically
 
 ## Deployment Instructions
@@ -42,6 +42,21 @@ The CloudFormation template creates the following resources:
 - `--notebook-instance TYPE` - SageMaker notebook instance type (default: ml.t3.medium)
 - `--optimization-instance TYPE` - SageMaker processing instance type (default: ml.c5.xlarge)
 - `--workshop-name NAME` - Name for workshop resources (default: model-optimization-workshop)
+
+## After Deployment
+
+Once the CloudFormation stack is deployed successfully:
+
+1. Open the SageMaker notebook instance using the URL provided in the stack outputs
+2. You'll see a welcome.md file with instructions
+3. Open a terminal in the notebook instance and run:
+   ```bash
+   cd SageMaker
+   git clone https://github.com/SaRedfiche/model-optimization-workshop.git
+   cd model-optimization-workshop
+   pip install -r requirements.txt
+   ```
+4. Open the first notebook: `01_introduction_and_setup.ipynb`
 
 ## Instance Type Recommendations
 

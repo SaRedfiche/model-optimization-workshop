@@ -92,7 +92,7 @@ Resources:
                   - logs:PutLogEvents
                 Resource: "*"
 
-  # SageMaker Lifecycle Configuration
+  # SageMaker Lifecycle Configuration - Simplified to avoid timeout
   NotebookLifecycleConfig:
     Type: AWS::SageMaker::NotebookInstanceLifecycleConfig
     Properties:
@@ -102,16 +102,8 @@ Resources:
               #!/bin/bash
               set -e
               
-              # Clone the workshop repository
-              cd /home/ec2-user/SageMaker
-              git clone https://github.com/SaRedfiche/model-optimization-workshop.git
-              
-              # Set up the workshop environment
-              cd model-optimization-workshop
-              pip install -r requirements.txt
-              
               # Create workshop_config.py with the S3 bucket and role ARN
-              cat > workshop_config.py << EOL
+              cat > /home/ec2-user/SageMaker/workshop_config.py << EOL
               S3_BUCKET = "${WorkshopBucket.BucketName}"
               AWS_REGION = "${AWS::Region}"
               SAGEMAKER_ROLE_ARN = "${SageMakerExecutionRole.Arn}"
@@ -119,7 +111,39 @@ Resources:
               EOL
               
               # Set proper permissions
-              chown -R ec2-user:ec2-user /home/ec2-user/SageMaker/model-optimization-workshop
+              chown -R ec2-user:ec2-user /home/ec2-user/SageMaker/workshop_config.py
+              
+              # Create a welcome message with instructions
+              cat > /home/ec2-user/SageMaker/welcome.md << EOL
+              # Welcome to the Model Optimization Workshop!
+              
+              This notebook instance has been set up with the necessary AWS resources for the workshop.
+              
+              ## Getting Started
+              
+              1. Open a new terminal and run:
+                 \`\`\`bash
+                 cd SageMaker
+                 git clone https://github.com/SaRedfiche/model-optimization-workshop.git
+                 cd model-optimization-workshop
+                 pip install -r requirements.txt
+                 \`\`\`
+              
+              2. Open the first notebook: \`01_introduction_and_setup.ipynb\`
+              
+              ## Workshop Configuration
+              
+              The following resources have been created for you:
+              - S3 Bucket: ${WorkshopBucket.BucketName}
+              - AWS Region: ${AWS::Region}
+              - SageMaker Role: ${SageMakerExecutionRole.Arn}
+              - Optimization Instance Type: ${OptimizationInstanceType}
+              
+              These values are stored in \`workshop_config.py\` and will be automatically loaded by the notebooks.
+              EOL
+              
+              # Set proper permissions
+              chown -R ec2-user:ec2-user /home/ec2-user/SageMaker/welcome.md
 
   # SageMaker Notebook Instance
   NotebookInstance:
@@ -130,7 +154,6 @@ Resources:
       RoleArn: !GetAtt SageMakerExecutionRole.Arn
       LifecycleConfigName: !GetAtt NotebookLifecycleConfig.NotebookInstanceLifecycleConfigName
       VolumeSizeInGB: 50
-      DefaultCodeRepository: https://github.com/SaRedfiche/model-optimization-workshop.git
       Tags:
         - Key: Name
           Value: !Sub "${WorkshopName}-notebook"
