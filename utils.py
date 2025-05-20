@@ -58,26 +58,7 @@ def get_model_size(model):
     size_mb = (param_size + buffer_size) / 1024**2
     return size_mb
 
-def measure_memory_usage(model, inputs):
-    """Measure peak memory usage during inference.
-    
-    Args:
-        model: The model to measure
-        inputs: Input tensors for the model
-        
-    Returns:
-        Memory usage in megabytes
-    """
-    # Record baseline memory
-    baseline = psutil.Process(os.getpid()).memory_info().rss / 1024**2
-    
-    # Run inference
-    _ = model(**inputs)
-    
-    # Record peak memory
-    peak = psutil.Process(os.getpid()).memory_info().rss / 1024**2
-    
-    return peak - baseline
+# Note: We're no longer using measure_memory_usage as model_size is a good proxy
 
 def plot_comparison(metrics, title, ylabel, higher_is_better=False):
     """Plot comparison of metrics across models.
@@ -98,80 +79,42 @@ def plot_comparison(metrics, title, ylabel, higher_is_better=False):
     models = [item[0] for item in sorted_items]
     values = [item[1] for item in sorted_items]
     
-    # Create bar plot
-    bars = plt.bar(models, values)
-    
-    # Add value labels
-    for bar in bars:
-        height = bar.get_height()
-        plt.text(bar.get_x() + bar.get_width()/2., height,
-                f'{height:.2f}',
-                ha='center', va='bottom', rotation=0)
-    
+    # Create bar chart
+    sns.barplot(x=models, y=values)
     plt.title(title)
     plt.ylabel(ylabel)
     plt.xticks(rotation=45, ha='right')
     plt.tight_layout()
     
-    return plt
+    return plt.gcf()
 
-def calculate_cost_savings(baseline_metrics, optimized_metrics, requests_per_month=1000000):
-    """Calculate cost savings from model optimization.
+def estimate_monthly_cost(metrics, requests_per_second=10, hours_per_day=24, days_per_month=30):
+    """Estimate monthly cost for a model.
     
     Args:
-        baseline_metrics: Dictionary with baseline model metrics
-        optimized_metrics: Dictionary with optimized model metrics
-        requests_per_month: Number of inference requests per month
+        metrics: Dictionary with model metrics
+        requests_per_second: Average number of requests per second
+        hours_per_day: Hours of operation per day
+        days_per_month: Days of operation per month
         
     Returns:
-        Dictionary with cost savings information
+        Dictionary with cost estimates
     """
-    # Assumptions
-    compute_cost_per_hour = 0.5  # $0.5 per hour for compute
-    storage_cost_per_gb_month = 0.023  # $0.023 per GB-month for S3
+    # Cost parameters (approximate)
+    instance_cost_per_hour = 0.5  # $0.50 per hour for ml.c5.xlarge
+    storage_cost_per_gb_month = 0.023  # $0.023 per GB-month for S3 Standard
     
-    # Calculate baseline costs
-    baseline_inference_time_hours = (baseline_metrics['inference_time'] * requests_per_month) / (1000 * 60 * 60)
-    baseline_compute_cost = baseline_inference_time_hours * compute_cost_per_hour
-    baseline_storage_cost = (baseline_metrics['model_size'] / 1024) * storage_cost_per_gb_month
-    baseline_total_cost = baseline_compute_cost + baseline_storage_cost
+    # Calculate monthly requests
+    monthly_requests = requests_per_second * 3600 * hours_per_day * days_per_month
     
-    # Calculate optimized costs
-    optimized_inference_time_hours = (optimized_metrics['inference_time'] * requests_per_month) / (1000 * 60 * 60)
-    optimized_compute_cost = optimized_inference_time_hours * compute_cost_per_hour
-    optimized_storage_cost = (optimized_metrics['model_size'] / 1024) * storage_cost_per_gb_month
-    optimized_total_cost = optimized_compute_cost + optimized_storage_cost
-    
-    # Calculate savings
-    savings = {
-        'compute_savings': baseline_compute_cost - optimized_compute_cost,
-        'storage_savings': baseline_storage_cost - optimized_storage_cost,
-        'total_savings': baseline_total_cost - optimized_total_cost,
-        'savings_percentage': (baseline_total_cost - optimized_total_cost) / baseline_total_cost * 100
-    }
-    
-    return savings
-
-def estimate_monthly_cost(model_metrics, requests_per_month=1000000):
-    """Estimate monthly cost for running a model in production.
-    
-    Args:
-        model_metrics: Dictionary with model metrics
-        requests_per_month: Number of inference requests per month
-        
-    Returns:
-        Dictionary with cost information
-    """
-    # Assumptions
-    compute_cost_per_hour = 0.5  # $0.5 per hour for compute (e.g., ml.g4dn.xlarge)
-    storage_cost_per_gb_month = 0.023  # $0.023 per GB-month for S3
-    
-    # Calculate compute cost
-    inference_time_hours = (model_metrics["inference_time"] * requests_per_month) / (1000 * 60 * 60)
-    compute_cost = inference_time_hours * compute_cost_per_hour
+    # Calculate compute cost based on inference time
+    inference_time_seconds = metrics["inference_time"] / 1000  # Convert ms to seconds
+    compute_hours = (inference_time_seconds * monthly_requests) / 3600
+    compute_cost = compute_hours * instance_cost_per_hour
     
     # Calculate storage cost
-    storage_cost = (model_metrics["model_size"] / 1024) * storage_cost_per_gb_month
+    storage_gb = metrics["model_size"] / 1024  # Convert MB to GB
+    storage_cost = storage_gb * storage_cost_per_gb_month
     
     # Total cost
     total_cost = compute_cost + storage_cost
@@ -182,139 +125,59 @@ def estimate_monthly_cost(model_metrics, requests_per_month=1000000):
         "total_cost": total_cost
     }
 
-def load_model_and_tokenizer(model_path, task, device=None):
-    """Load model and tokenizer from local path.
+def load_model_and_tokenizer(model_name, task):
+    """Load model and tokenizer based on task.
     
     Args:
-        model_path: Path to the model directory
+        model_name: Name of the model to load
         task: Task type (sequence-classification, token-classification, etc.)
-        device: Device to load the model on (defaults to GPU if available)
         
     Returns:
         Tuple of (model, tokenizer)
     """
-    from transformers import (
-        AutoTokenizer, 
-        AutoModelForSequenceClassification,
-        AutoModelForTokenClassification,
-        AutoModelForQuestionAnswering,
-        AutoModelForMaskedLM
-    )
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification
+    from transformers import AutoModelForTokenClassification, AutoModelForQuestionAnswering
+    from transformers import AutoModelForMaskedLM
     
-    if device is None:
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    
-    # Load model based on task
     if task == "sequence-classification":
-        model = AutoModelForSequenceClassification.from_pretrained(model_path)
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
     elif task == "token-classification":
-        model = AutoModelForTokenClassification.from_pretrained(model_path)
+        model = AutoModelForTokenClassification.from_pretrained(model_name)
     elif task == "question-answering":
-        model = AutoModelForQuestionAnswering.from_pretrained(model_path)
+        model = AutoModelForQuestionAnswering.from_pretrained(model_name)
     elif task == "masked-lm":
-        model = AutoModelForMaskedLM.from_pretrained(model_path)
+        model = AutoModelForMaskedLM.from_pretrained(model_name)
     else:
         raise ValueError(f"Unsupported task: {task}")
     
-    # Move model to device
-    model = model.to(device)
-    model.eval()  # Set model to evaluation mode
-    
     return model, tokenizer
 
-def prepare_inputs(task, sample_input, tokenizer, device):
-    """Prepare inputs for the model based on task.
+def prepare_inputs(task, tokenizer, sample_input):
+    """Prepare inputs for different model tasks.
     
     Args:
         task: Task type (sequence-classification, token-classification, etc.)
-        sample_input: Input text or dictionary
         tokenizer: Tokenizer to use
-        device: Device to place tensors on
+        sample_input: Sample input text or dictionary
         
     Returns:
         Dictionary of input tensors
     """
-    if task == "sequence-classification" or task == "token-classification":
+    if task == "sequence-classification":
+        inputs = tokenizer(sample_input, return_tensors="pt")
+    elif task == "token-classification":
         inputs = tokenizer(sample_input, return_tensors="pt")
     elif task == "question-answering":
-        inputs = tokenizer(sample_input["question"], sample_input["context"], return_tensors="pt")
+        inputs = tokenizer(
+            sample_input["question"],
+            sample_input["context"],
+            return_tensors="pt"
+        )
     elif task == "masked-lm":
         inputs = tokenizer(sample_input, return_tensors="pt")
     else:
         raise ValueError(f"Unsupported task: {task}")
     
-    # Move inputs to the same device as the model
-    inputs = {k: v.to(device) for k, v in inputs.items()}
-    
     return inputs
-
-def package_model_for_sagemaker(model_path, s3_bucket, model_name):
-    """Package a model for SageMaker deployment.
-    
-    Args:
-        model_path: Path to the model directory
-        s3_bucket: S3 bucket to upload to
-        model_name: Name for the model
-        
-    Returns:
-        S3 URI for the packaged model
-    """
-    import tarfile
-    import tempfile
-    import shutil
-    
-    # Create a temporary directory
-    temp_dir = tempfile.mkdtemp()
-    model_dir = os.path.join(temp_dir, "model")
-    os.makedirs(model_dir, exist_ok=True)
-    
-    # Copy model files to temporary directory
-    for item in os.listdir(model_path):
-        s = os.path.join(model_path, item)
-        d = os.path.join(model_dir, item)
-        if os.path.isdir(s):
-            shutil.copytree(s, d)
-        else:
-            shutil.copy2(s, d)
-    
-    # Create tar.gz file
-    tar_path = os.path.join(temp_dir, "model.tar.gz")
-    with tarfile.open(tar_path, "w:gz") as tar:
-        tar.add(model_dir, arcname="")
-    
-    # Upload to S3
-    s3_client = boto3.client('s3')
-    s3_key = f"models/{model_name.replace('/', '-')}/model.tar.gz"
-    s3_client.upload_file(tar_path, s3_bucket, s3_key)
-    
-    # Clean up
-    shutil.rmtree(temp_dir)
-    
-    return f"s3://{s3_bucket}/{s3_key}"
-
-def plot_metric_comparison(df, metric, title, ylabel, higher_is_better=False):
-    """Plot comparison for a specific metric.
-    
-    Args:
-        df: DataFrame with comparison data
-        metric: Column name for the metric to plot
-        title: Plot title
-        ylabel: Y-axis label
-        higher_is_better: Whether higher values are better
-        
-    Returns:
-        None (displays plot)
-    """
-    plt.figure(figsize=(12, 6))
-    
-    # Create grouped bar plot
-    sns.barplot(x="Model", y=metric, hue="Type", data=df)
-    
-    plt.title(title)
-    plt.ylabel(ylabel)
-    plt.xticks(rotation=45, ha="right")
-    plt.tight_layout()
-    plt.show()
