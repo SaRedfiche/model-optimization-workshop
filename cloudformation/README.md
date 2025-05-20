@@ -73,8 +73,8 @@ After deploying the CloudFormation stack, follow these steps to set up the works
    - You'll need to enter the following values from the CloudFormation stack outputs:
      - S3 Bucket Name
      - AWS Region
-     - SageMaker Role ARN
      - Optimization Instance Type
+   - The SageMaker Role ARN will be automatically detected
 
 ## Instance Type Recommendations
 
