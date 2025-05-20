@@ -8,8 +8,7 @@ The CloudFormation template creates the following resources:
 
 1. **S3 Bucket** - For storing models, scripts, and optimization outputs
 2. **IAM Role** - With permissions for SageMaker and S3 access
-3. **SageMaker Notebook Instance** - Pre-configured with workshop configuration
-4. **Lifecycle Configuration** - To set up the notebook environment automatically
+3. **SageMaker Notebook Instance** - For running the workshop notebooks
 
 ## Deployment Instructions
 
@@ -43,20 +42,39 @@ The CloudFormation template creates the following resources:
 - `--optimization-instance TYPE` - SageMaker processing instance type (default: ml.c5.xlarge)
 - `--workshop-name NAME` - Name for workshop resources (default: model-optimization-workshop)
 
-## After Deployment
+## Getting Started with the Workshop
 
-Once the CloudFormation stack is deployed successfully:
+After deploying the CloudFormation stack, follow these steps to set up the workshop environment:
 
-1. Open the SageMaker notebook instance using the URL provided in the stack outputs
-2. You'll see a welcome.md file with instructions
-3. Open a terminal in the notebook instance and run:
-   ```bash
-   cd SageMaker
-   git clone https://github.com/SaRedfiche/model-optimization-workshop.git
-   cd model-optimization-workshop
-   pip install -r requirements.txt
-   ```
-4. Open the first notebook: `01_introduction_and_setup.ipynb`
+1. **Access your SageMaker notebook instance**:
+   - Open the SageMaker console
+   - Find your notebook instance named "model-optimization-workshop-notebook"
+   - Click "Open JupyterLab"
+
+2. **Clone the workshop repository**:
+   - Open a terminal in JupyterLab (File > New > Terminal)
+   - Run the following commands:
+     ```bash
+     cd SageMaker
+     git clone https://github.com/SaRedfiche/model-optimization-workshop.git
+     cd model-optimization-workshop
+     ```
+
+3. **Install required packages**:
+   - In the terminal, run:
+     ```bash
+     pip install -r requirements.txt
+     ```
+
+4. **Start the workshop**:
+   - Navigate to the repository folder in the JupyterLab file browser
+   - Open the first notebook: `01_introduction_and_setup.ipynb`
+   - Follow the instructions in the notebook to configure your workshop settings
+   - You'll need to enter the following values from the CloudFormation stack outputs:
+     - S3 Bucket Name
+     - AWS Region
+     - SageMaker Role ARN
+     - Optimization Instance Type
 
 ## Instance Type Recommendations
 
@@ -97,3 +115,4 @@ When you're done with the workshop, you can clean up all resources using the cle
 - **Stack Creation Fails**: Check the CloudFormation events in the AWS Console for specific error messages
 - **Notebook Instance Not Ready**: SageMaker notebook instances can take several minutes to provision
 - **Permission Issues**: Ensure your AWS CLI user has sufficient permissions to create IAM roles and SageMaker resources
+- **JupyterLab Not Loading**: Try accessing through the SageMaker console directly by clicking "Open JupyterLab"

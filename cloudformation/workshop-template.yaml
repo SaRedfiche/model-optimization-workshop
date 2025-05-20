@@ -92,69 +92,13 @@ Resources:
                   - logs:PutLogEvents
                 Resource: "*"
 
-  # SageMaker Lifecycle Configuration - Fixed to avoid shell errors
-  NotebookLifecycleConfig:
-    Type: AWS::SageMaker::NotebookInstanceLifecycleConfig
-    Properties:
-      OnStart:
-        - Content:
-            Fn::Base64: |
-              #!/bin/bash
-              
-              # Create workshop_config.py with the S3 bucket and role ARN
-              BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name ${AWS::StackName} --query "Stacks[0].Outputs[?OutputKey=='WorkshopBucketName'].OutputValue" --output text)
-              ROLE_ARN=$(aws cloudformation describe-stacks --stack-name ${AWS::StackName} --query "Stacks[0].Outputs[?OutputKey=='SageMakerRoleArn'].OutputValue" --output text)
-              REGION=$(aws configure get region)
-              OPT_INSTANCE_TYPE="${OptimizationInstanceType}"
-              
-              echo "S3_BUCKET = '$BUCKET_NAME'" > /home/ec2-user/SageMaker/workshop_config.py
-              echo "AWS_REGION = '$REGION'" >> /home/ec2-user/SageMaker/workshop_config.py
-              echo "SAGEMAKER_ROLE_ARN = '$ROLE_ARN'" >> /home/ec2-user/SageMaker/workshop_config.py
-              echo "OPTIMIZATION_INSTANCE_TYPE = '$OPT_INSTANCE_TYPE'" >> /home/ec2-user/SageMaker/workshop_config.py
-              
-              # Set proper permissions
-              chown -R ec2-user:ec2-user /home/ec2-user/SageMaker/workshop_config.py
-              
-              # Create a welcome message with instructions
-              cat > /home/ec2-user/SageMaker/welcome.md << EOF
-              # Welcome to the Model Optimization Workshop!
-              
-              This notebook instance has been set up with the necessary AWS resources for the workshop.
-              
-              ## Getting Started
-              
-              1. Open a new terminal and run:
-                 \`\`\`bash
-                 cd SageMaker
-                 git clone https://github.com/SaRedfiche/model-optimization-workshop.git
-                 cd model-optimization-workshop
-                 pip install -r requirements.txt
-                 \`\`\`
-              
-              2. Open the first notebook: \`01_introduction_and_setup.ipynb\`
-              
-              ## Workshop Configuration
-              
-              The following resources have been created for you:
-              - S3 Bucket: $BUCKET_NAME
-              - AWS Region: $REGION
-              - SageMaker Role: $ROLE_ARN
-              - Optimization Instance Type: $OPT_INSTANCE_TYPE
-              
-              These values are stored in \`workshop_config.py\` and will be automatically loaded by the notebooks.
-              EOF
-              
-              # Set proper permissions
-              chown -R ec2-user:ec2-user /home/ec2-user/SageMaker/welcome.md
-
-  # SageMaker Notebook Instance
+  # SageMaker Notebook Instance (without lifecycle config)
   NotebookInstance:
     Type: AWS::SageMaker::NotebookInstance
     Properties:
       NotebookInstanceName: !Sub "${WorkshopName}-notebook"
       InstanceType: !Ref NotebookInstanceType
       RoleArn: !GetAtt SageMakerExecutionRole.Arn
-      LifecycleConfigName: !GetAtt NotebookLifecycleConfig.NotebookInstanceLifecycleConfigName
       VolumeSizeInGB: 50
       Tags:
         - Key: Name
@@ -178,3 +122,7 @@ Outputs:
   SageMakerRoleArn:
     Description: IAM Role ARN for SageMaker
     Value: !GetAtt SageMakerExecutionRole.Arn
+    
+  OptimizationInstanceTypeOutput:
+    Description: Instance type for optimization jobs
+    Value: !Ref OptimizationInstanceType
