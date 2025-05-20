@@ -92,7 +92,7 @@ Resources:
                   - logs:PutLogEvents
                 Resource: "*"
 
-  # SageMaker Lifecycle Configuration - Simplified to avoid timeout
+  # SageMaker Lifecycle Configuration - Fixed to avoid shell errors
   NotebookLifecycleConfig:
     Type: AWS::SageMaker::NotebookInstanceLifecycleConfig
     Properties:
@@ -100,21 +100,23 @@ Resources:
         - Content:
             Fn::Base64: |
               #!/bin/bash
-              set -e
               
               # Create workshop_config.py with the S3 bucket and role ARN
-              cat > /home/ec2-user/SageMaker/workshop_config.py << EOL
-              S3_BUCKET = "${WorkshopBucket.BucketName}"
-              AWS_REGION = "${AWS::Region}"
-              SAGEMAKER_ROLE_ARN = "${SageMakerExecutionRole.Arn}"
-              OPTIMIZATION_INSTANCE_TYPE = "${OptimizationInstanceType}"
-              EOL
+              BUCKET_NAME=$(aws cloudformation describe-stacks --stack-name ${AWS::StackName} --query "Stacks[0].Outputs[?OutputKey=='WorkshopBucketName'].OutputValue" --output text)
+              ROLE_ARN=$(aws cloudformation describe-stacks --stack-name ${AWS::StackName} --query "Stacks[0].Outputs[?OutputKey=='SageMakerRoleArn'].OutputValue" --output text)
+              REGION=$(aws configure get region)
+              OPT_INSTANCE_TYPE="${OptimizationInstanceType}"
+              
+              echo "S3_BUCKET = '$BUCKET_NAME'" > /home/ec2-user/SageMaker/workshop_config.py
+              echo "AWS_REGION = '$REGION'" >> /home/ec2-user/SageMaker/workshop_config.py
+              echo "SAGEMAKER_ROLE_ARN = '$ROLE_ARN'" >> /home/ec2-user/SageMaker/workshop_config.py
+              echo "OPTIMIZATION_INSTANCE_TYPE = '$OPT_INSTANCE_TYPE'" >> /home/ec2-user/SageMaker/workshop_config.py
               
               # Set proper permissions
               chown -R ec2-user:ec2-user /home/ec2-user/SageMaker/workshop_config.py
               
               # Create a welcome message with instructions
-              cat > /home/ec2-user/SageMaker/welcome.md << EOL
+              cat > /home/ec2-user/SageMaker/welcome.md << EOF
               # Welcome to the Model Optimization Workshop!
               
               This notebook instance has been set up with the necessary AWS resources for the workshop.
@@ -134,13 +136,13 @@ Resources:
               ## Workshop Configuration
               
               The following resources have been created for you:
-              - S3 Bucket: ${WorkshopBucket.BucketName}
-              - AWS Region: ${AWS::Region}
-              - SageMaker Role: ${SageMakerExecutionRole.Arn}
-              - Optimization Instance Type: ${OptimizationInstanceType}
+              - S3 Bucket: $BUCKET_NAME
+              - AWS Region: $REGION
+              - SageMaker Role: $ROLE_ARN
+              - Optimization Instance Type: $OPT_INSTANCE_TYPE
               
               These values are stored in \`workshop_config.py\` and will be automatically loaded by the notebooks.
-              EOL
+              EOF
               
               # Set proper permissions
               chown -R ec2-user:ec2-user /home/ec2-user/SageMaker/welcome.md
