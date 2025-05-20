@@ -22,17 +22,22 @@ This workshop provides a hands-on experience for optimizing machine learning mod
 
 ## Setup Instructions
 
-### SageMaker Setup
+### Automated Setup with CloudFormation
+
+The easiest way to set up the workshop environment is using the provided CloudFormation template:
+
+1. Navigate to the `cloudformation` directory
+2. Follow the instructions in the `README.md` file to deploy the CloudFormation stack
+3. After the stack is deployed, follow the "Getting Started" instructions to clone the repository and set up the workshop environment
+
+### Manual SageMaker Setup
+
+If you prefer to set up the environment manually:
 
 1. Launch a SageMaker notebook instance with the following specifications:
    - Instance type: ml.t3.xlarge (minimum) or ml.g4dn.xlarge (recommended for GPU acceleration)
    - Use the standard ML AMI provided by SageMaker
-   - Attach an IAM role with the necessary permissions (see `sagemaker_permissions.md`)
-
-   **Recommended Instance Types:**
-   - **ml.t3.xlarge**: Good for initial notebooks and smaller models (4 vCPUs, 16 GB memory)
-   - **ml.g4dn.xlarge**: Better for optimization tasks with GPU acceleration (4 vCPUs, 16 GB memory, 1 NVIDIA T4 GPU)
-   - **ml.g4dn.2xlarge**: For working with multiple large models (8 vCPUs, 32 GB memory, 1 NVIDIA T4 GPU)
+   - Attach an IAM role with the necessary permissions (AmazonSageMakerFullAccess and S3 access)
 
 2. Clone this repository to your SageMaker notebook instance:
    ```bash
@@ -45,7 +50,7 @@ This workshop provides a hands-on experience for optimizing machine learning mod
    pip install -r requirements.txt
    ```
 
-4. Open the first notebook `01_introduction.ipynb` and follow the instructions.
+4. Open the first notebook `01_introduction_and_setup.ipynb` and follow the instructions.
 
 ### Local Setup (Alternative)
 
@@ -73,11 +78,22 @@ If you prefer to run the workshop locally:
    aws configure
    ```
 
-5. Open the first notebook `01_introduction.ipynb` and follow the instructions.
+5. Open the first notebook `01_introduction_and_setup.ipynb` and follow the instructions.
+
+## Recommended Instance Types
+
+- **Notebook Instance**:
+  - **ml.t3.medium**: Good for initial notebooks and smaller models (4 vCPUs, 16 GB memory)
+  - **ml.t3.large**: Better for more demanding notebooks (2 vCPU, 8 GiB memory)
+  - **ml.g4dn.xlarge**: For GPU-accelerated tasks (4 vCPU, 16 GiB memory, 1 GPU)
+
+- **Optimization Instance** (for distributed processing):
+  - **ml.c5.xlarge**: Good for CPU-based quantization (4 vCPU, 8 GiB memory)
+  - **ml.g4dn.xlarge**: For GPU-accelerated tasks (4 vCPU, 16 GiB memory, 1 GPU)
 
 ## Documentation
 
-- `sagemaker_permissions.md` - Details on the required IAM permissions
+- `cloudformation/README.md` - Instructions for deploying with CloudFormation
 - `model_optimization_techniques.md` - Overview of model optimization techniques
 - `quantization_deep_dive.md` - Detailed explanation of quantization methods
 - `pruning_techniques.md` - Detailed explanation of pruning techniques
