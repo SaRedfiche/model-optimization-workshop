@@ -4,6 +4,7 @@ This file contains helper functions for robustness and observability.
 """
 
 import json
+import time
 import boto3
 import traceback
 
@@ -24,6 +25,19 @@ def analyze_job_failure(job_name):
     print(f"View detailed logs at: {logs_url}")
     return failure_reason
 
+def save_checkpoint(s3_bucket, job_name, stage, data):
+    """Save a checkpoint to S3 to track progress."""
+    s3_client = boto3.client('s3')
+    checkpoint_key = f"checkpoints/{job_name}/{stage}.json"
+    
+    s3_client.put_object(
+        Bucket=s3_bucket,
+        Key=checkpoint_key,
+        Body=json.dumps(data)
+    )
+    
+    print(f"Saved checkpoint for stage '{stage}' to s3://{s3_bucket}/{checkpoint_key}")
+
 def handle_processing_error(e, job_name=None):
     """Handle processing errors consistently across notebooks."""
     print(f"Error: {str(e)}")
@@ -39,3 +53,6 @@ def handle_processing_error(e, job_name=None):
     print("2. Verify S3 paths and permissions")
     print("3. Check for sufficient instance resources")
     print("4. Review CloudWatch logs for detailed error messages")
+    print("5. Ensure the script has the correct permissions")
+    print("6. Verify that the model is compatible with the optimization technique")
+    print("7. Try with a smaller model or larger instance type")
