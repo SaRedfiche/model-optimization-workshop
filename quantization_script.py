@@ -1,149 +1,118 @@
 """
-Script for running quantization on a SageMaker Processing instance.
-This script is designed to be run as a SageMaker Processing job.
+Quantization script for model optimization workshop.
+This script applies quantization to transformer models and measures performance metrics.
 """
 
 import os
 import json
 import torch
 import argparse
-from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoModelForTokenClassification
-from transformers import AutoModelForQuestionAnswering, AutoModelForMaskedLM
-import torch.quantization
-import boto3
-import time
+import numpy as np
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoModelForTokenClassification, AutoModelForQuestionAnswering
+from transformers import AutoModelForMaskedLM
 
-# Try to import Intel optimizations
-try:
-    from optimum.intel import INCQuantizer, INCModelForSequenceClassification
-    from optimum.intel import INCModelForTokenClassification, INCModelForQuestionAnswering
-    intel_optimum_available = True
-    print("Intel Neural Compressor (optimum-intel) is available")
-except ImportError:
-    intel_optimum_available = False
-    print("Intel Neural Compressor (optimum-intel) is not available. Will use PyTorch quantization only.")
-
-def download_model_from_s3(s3_uri, local_path):
-    """Download model from S3 to local path."""
-    # Parse S3 URI
-    s3_parts = s3_uri.replace("s3://", "").split("/")
-    bucket = s3_parts[0]
-    prefix = "/".join(s3_parts[1:])
+def load_model_and_tokenizer(model_name, task):
+    """Load model and tokenizer based on task."""
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
     
-    # Create S3 client
-    s3_client = boto3.client('s3')
-    
-    # List objects in the prefix
-    response = s3_client.list_objects_v2(Bucket=bucket, Prefix=prefix)
-    
-    # Download each file
-    os.makedirs(local_path, exist_ok=True)
-    for obj in response.get('Contents', []):
-        key = obj['Key']
-        filename = os.path.basename(key)
-        if filename:  # Skip directory entries
-            local_file = os.path.join(local_path, filename)
-            s3_client.download_file(bucket, key, local_file)
-    
-    print(f"Downloaded model from {s3_uri} to {local_path}")
-
-def upload_model_to_s3(local_path, s3_uri):
-    """Upload model from local path to S3."""
-    # Parse S3 URI
-    s3_parts = s3_uri.replace("s3://", "").split("/")
-    bucket = s3_parts[0]
-    prefix = "/".join(s3_parts[1:])
-    
-    # Create S3 client
-    s3_client = boto3.client('s3')
-    
-    # Upload all files in the directory
-    for root, _, files in os.walk(local_path):
-        for file in files:
-            local_file = os.path.join(root, file)
-            relative_path = os.path.relpath(local_file, local_path)
-            s3_key = f"{prefix}/{relative_path}"
-            s3_client.upload_file(local_file, bucket, s3_key)
-    
-    print(f"Uploaded model from {local_path} to {s3_uri}")
-
-def quantize_model_dynamic(model_path, task, output_path):
-    """Apply dynamic quantization to a model."""
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
-    
-    # Prepare sample input based on task
     if task == "sequence-classification":
-        sample_input = "This is a sample input for sequence classification."
+        model = AutoModelForSequenceClassification.from_pretrained(model_name)
     elif task == "token-classification":
-        sample_input = "John Smith works at Amazon in Seattle."
+        model = AutoModelForTokenClassification.from_pretrained(model_name)
     elif task == "question-answering":
-        sample_input = {
-            "question": "What is machine learning?",
-            "context": "Machine learning is a branch of artificial intelligence that focuses on building systems that learn from data."
-        }
+        model = AutoModelForQuestionAnswering.from_pretrained(model_name)
     elif task == "masked-lm":
-        sample_input = "The [MASK] is a large language model trained by OpenAI."
+        model = AutoModelForMaskedLM.from_pretrained(model_name)
     else:
         raise ValueError(f"Unsupported task: {task}")
     
-    # Prepare inputs
-    if task == "sequence-classification" or task == "token-classification":
-        inputs = tokenizer(sample_input, return_tensors="pt")
-    elif task == "question-answering":
-        inputs = tokenizer(sample_input["question"], sample_input["context"], return_tensors="pt")
-    elif task == "masked-lm":
-        inputs = tokenizer(sample_input, return_tensors="pt")
-    
-    # Check if we can use Intel Neural Compressor for better CPU performance
-    if intel_optimum_available:
-        try:
-            print("Using Intel Neural Compressor for quantization...")
-            
-            # Use Intel Neural Compressor for quantization
-            quantizer = INCQuantizer.from_pretrained(model_path)
-            
-            # Apply dynamic quantization
-            quantized_model = quantizer.quantize(save_directory=output_path, quantization_approach="dynamic")
-            
-            print(f"Model quantized with Intel Neural Compressor and saved to {output_path}")
-            return
-            
-        except Exception as e:
-            print(f"Intel Neural Compressor failed: {e}. Falling back to PyTorch quantization.")
-    
-    # Fall back to PyTorch quantization
-    print("Using PyTorch dynamic quantization...")
-    
-    # Load model based on task
+    return model, tokenizer
+
+def prepare_inputs(task, tokenizer, sample_input):
+    """Prepare inputs for different model tasks."""
     if task == "sequence-classification":
-        model = AutoModelForSequenceClassification.from_pretrained(model_path)
+        inputs = tokenizer(sample_input, return_tensors="pt")
     elif task == "token-classification":
-        model = AutoModelForTokenClassification.from_pretrained(model_path)
+        inputs = tokenizer(sample_input, return_tensors="pt")
     elif task == "question-answering":
-        model = AutoModelForQuestionAnswering.from_pretrained(model_path)
+        inputs = tokenizer(
+            sample_input["question"],
+            sample_input["context"],
+            return_tensors="pt"
+        )
     elif task == "masked-lm":
-        model = AutoModelForMaskedLM.from_pretrained(model_path)
+        inputs = tokenizer(sample_input, return_tensors="pt")
+    else:
+        raise ValueError(f"Unsupported task: {task}")
     
-    # Apply dynamic quantization
-    model = torch.quantization.quantize_dynamic(
-        model, 
-        {torch.nn.Linear}, 
-        dtype=torch.qint8
-    )
+    return inputs
+
+def measure_inference_time(model, inputs, num_runs=10):
+    """Measure inference time for a model."""
+    # Warm-up run
+    with torch.no_grad():
+        _ = model(**inputs)
     
-    # Save quantized model
-    os.makedirs(output_path, exist_ok=True)
-    torch.save(model.state_dict(), os.path.join(output_path, "pytorch_model.bin"))
-    tokenizer.save_pretrained(output_path)
+    # Measure inference time
+    start_time = torch.cuda.Event(enable_timing=True)
+    end_time = torch.cuda.Event(enable_timing=True)
     
-    print(f"Model quantized with PyTorch and saved to {output_path}")
+    timings = []
+    with torch.no_grad():
+        for _ in range(num_runs):
+            start_time.record()
+            _ = model(**inputs)
+            end_time.record()
+            torch.cuda.synchronize()
+            timings.append(start_time.elapsed_time(end_time))
+    
+    return sum(timings) / len(timings)
+
+def get_model_size(model):
+    """Get model size in MB."""
+    param_size = 0
+    for param in model.parameters():
+        param_size += param.nelement() * param.element_size()
+    buffer_size = 0
+    for buffer in model.buffers():
+        buffer_size += buffer.nelement() * buffer.element_size()
+    
+    size_mb = (param_size + buffer_size) / 1024**2
+    return size_mb
+
+def apply_quantization(model, method="dynamic", bits=8):
+    """Apply quantization to a model."""
+    if method == "dynamic":
+        # Dynamic quantization (quantizes weights at runtime)
+        quantized_model = torch.quantization.quantize_dynamic(
+            model, {torch.nn.Linear}, dtype=torch.qint8
+        )
+    elif method == "static":
+        # Static quantization (requires calibration data)
+        # This is a simplified version for demonstration
+        model.qconfig = torch.quantization.get_default_qconfig('fbgemm')
+        torch.quantization.prepare(model, inplace=True)
+        # Calibration would happen here with real data
+        quantized_model = torch.quantization.convert(model, inplace=False)
+    elif method == "aware":
+        # Quantization-aware training (requires training)
+        # This is a simplified version for demonstration
+        model.qconfig = torch.quantization.get_default_qat_qconfig('fbgemm')
+        torch.quantization.prepare_qat(model, inplace=True)
+        # Training would happen here
+        quantized_model = torch.quantization.convert(model, inplace=False)
+    else:
+        raise ValueError(f"Unsupported quantization method: {method}")
+    
+    return quantized_model
 
 def main():
-    parser = argparse.ArgumentParser(description="Quantize a model using SageMaker Processing")
-    parser.add_argument("--model-info-path", type=str, default="/opt/ml/processing/input/model_info/model_info.json")
-    parser.add_argument("--output-dir", type=str, default="/opt/ml/processing/output/quantized_model")
-    
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--model-info-path', type=str, required=True)
+    parser.add_argument('--output-dir', type=str, required=True)
+    parser.add_argument('--quantization-method', type=str, default='dynamic')
+    parser.add_argument('--quantization-bits', type=int, default=8)
     args = parser.parse_args()
     
     # Load model info
@@ -151,24 +120,75 @@ def main():
         model_info = json.load(f)
     
     # Process each model
+    quantized_metrics = {}
     for model_key, info in model_info.items():
-        print(f"Processing model: {model_key}")
+        print(f"Processing {model_key}: {info['model_name']}")
         
-        # Download model from S3
-        local_model_path = f"/tmp/models/{model_key}"
-        download_model_from_s3(info["s3_uri"], local_model_path)
+        # Load model and tokenizer
+        model, tokenizer = load_model_and_tokenizer(info['model_name'], info['task'])
         
-        # Create output path
-        local_output_path = f"/tmp/quantized/{model_key}"
+        # Define sample input
+        if info['task'] == 'sequence-classification':
+            sample_input = "This is a sample input for sentiment analysis."
+        elif info['task'] == 'token-classification':
+            sample_input = "John Smith works at Microsoft in Seattle."
+        elif info['task'] == 'question-answering':
+            sample_input = {
+                "question": "What is machine learning?",
+                "context": "Machine learning is a branch of artificial intelligence."
+            }
+        elif info['task'] == 'masked-lm':
+            sample_input = "The [MASK] is a large language model."
         
-        # Quantize model
-        quantize_model_dynamic(local_model_path, info["task"], local_output_path)
+        # Prepare inputs
+        inputs = prepare_inputs(info['task'], tokenizer, sample_input)
         
-        # Upload quantized model to output location
-        output_path = os.path.join(args.output_dir, model_key)
-        upload_model_to_s3(local_output_path, output_path)
+        # Apply quantization
+        quantized_model = apply_quantization(
+            model, 
+            method=args.quantization_method,
+            bits=args.quantization_bits
+        )
         
-        print(f"Completed quantization for {model_key}")
+        # Move to GPU if available
+        if torch.cuda.is_available():
+            model = model.to('cuda')
+            quantized_model = quantized_model.to('cuda')
+            inputs = {k: v.to('cuda') for k, v in inputs.items()}
+        
+        # Measure metrics
+        model_size = get_model_size(model)
+        quantized_size = get_model_size(quantized_model)
+        inference_time = measure_inference_time(model, inputs)
+        quantized_inference_time = measure_inference_time(quantized_model, inputs)
+        num_parameters = sum(p.numel() for p in model.parameters())
+        quantized_parameters = sum(p.numel() for p in quantized_model.parameters())
+        
+        # Save quantized model
+        output_dir = os.path.join(args.output_dir, model_key)
+        os.makedirs(output_dir, exist_ok=True)
+        torch.save(quantized_model.state_dict(), os.path.join(output_dir, "quantized_model.pt"))
+        tokenizer.save_pretrained(output_dir)
+        
+        # Save metrics
+        quantized_metrics[model_key] = {
+            "model_key": model_key,
+            "model_name": info['model_name'],
+            "task": info['task'],
+            "quantization_method": args.quantization_method,
+            "quantization_bits": args.quantization_bits,
+            "model_size": quantized_size,
+            "original_size": model_size,
+            "inference_time": quantized_inference_time,
+            "original_inference_time": inference_time,
+            "num_parameters": quantized_parameters,
+            "size_reduction": (model_size - quantized_size) / model_size * 100,
+            "speedup": inference_time / quantized_inference_time
+        }
+    
+    # Save metrics to file
+    with open(os.path.join(args.output_dir, 'quantized_metrics.json'), 'w') as f:
+        json.dump(quantized_metrics, f, indent=2)
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()
