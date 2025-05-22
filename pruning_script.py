@@ -19,6 +19,7 @@ import numpy as np
 import logging
 import traceback
 import sys
+import time
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import AutoModelForTokenClassification, AutoModelForQuestionAnswering
 from transformers import AutoModelForMaskedLM
@@ -226,56 +227,53 @@ def prune_model(model_key, model_info, pruning_method, pruning_amount, output_di
     
     return metrics, model
 
-def main():
-    parser = argparse.ArgumentParser(description="Pruning script")
-    parser.add_argument("--model-info-path", type=str, required=True, help="Path to model info JSON file")
-    parser.add_argument("--output-dir", type=str, required=True, help="Output directory for metrics and models")
-    parser.add_argument("--pruning-method", type=str, default="l1_unstructured", 
-                        choices=["l1_unstructured", "random_unstructured", "l2_structured"],
-                        help="Pruning method to use")
-    parser.add_argument("--pruning-amount", type=float, default=0.3, 
-                        help="Amount of weights to prune (0.0 to 1.0)")
-    args = parser.parse_args()
-    
-    try:
-        # Load model info
-        logger.info(f"Loading model info from {args.model_info_path}")
-        with open(args.model_info_path, "r") as f:
-            model_info = json.load(f)
-        
-        # Create output directory if it doesn't exist
-        os.makedirs(args.output_dir, exist_ok=True)
-        
-        # Prune each model
-        all_metrics = {}
-        for model_key, info in model_info.items():
-            try:
-                metrics, pruned_model = prune_model(
-                    model_key, info, args.pruning_method, args.pruning_amount, args.output_dir
-                )
-                all_metrics[model_key] = metrics
-                
-                # Save pruned model
-                model_dir = os.path.join(args.output_dir, f"{model_key}_pruned")
-                os.makedirs(model_dir, exist_ok=True)
-                pruned_model.save_pretrained(model_dir)
-                logger.info(f"Saved pruned model to {model_dir}")
-                
-            except Exception as e:
-                logger.error(f"Error pruning model {model_key}: {e}")
-                logger.error(traceback.format_exc())
-        
-        # Save all metrics to a single file
-        metrics_path = os.path.join(args.output_dir, "pruned_metrics.json")
-        with open(metrics_path, "w") as f:
-            json.dump(all_metrics, f, indent=2)
-        
-        logger.info(f"Saved pruned metrics to {metrics_path}")
-    
-    except Exception as e:
-        logger.error(f"Error in pruning: {e}")
-        logger.error(traceback.format_exc())
-        sys.exit(1)
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Pruning script")
+parser.add_argument("--model-info-path", type=str, required=True, help="Path to model info JSON file")
+parser.add_argument("--output-dir", type=str, required=True, help="Output directory for metrics and models")
+parser.add_argument("--pruning-method", type=str, default="l1_unstructured", 
+                    choices=["l1_unstructured", "random_unstructured", "l2_structured"],
+                    help="Pruning method to use")
+parser.add_argument("--pruning-amount", type=float, default=0.3, 
+                    help="Amount of weights to prune (0.0 to 1.0)")
+args = parser.parse_args()
 
-if __name__ == "__main__":
-    main()
+try:
+    # Load model info
+    logger.info(f"Loading model info from {args.model_info_path}")
+    with open(args.model_info_path, "r") as f:
+        model_info = json.load(f)
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Prune each model
+    all_metrics = {}
+    for model_key, info in model_info.items():
+        try:
+            metrics, pruned_model = prune_model(
+                model_key, info, args.pruning_method, args.pruning_amount, args.output_dir
+            )
+            all_metrics[model_key] = metrics
+            
+            # Save pruned model
+            model_dir = os.path.join(args.output_dir, f"{model_key}_pruned")
+            os.makedirs(model_dir, exist_ok=True)
+            pruned_model.save_pretrained(model_dir)
+            logger.info(f"Saved pruned model to {model_dir}")
+            
+        except Exception as e:
+            logger.error(f"Error pruning model {model_key}: {e}")
+            logger.error(traceback.format_exc())
+    
+    # Save all metrics to a single file
+    metrics_path = os.path.join(args.output_dir, "pruned_metrics.json")
+    with open(metrics_path, "w") as f:
+        json.dump(all_metrics, f, indent=2)
+    
+    logger.info(f"Saved pruned metrics to {metrics_path}")
+
+except Exception as e:
+    logger.error(f"Error in pruning: {e}")
+    logger.error(traceback.format_exc())
+    sys.exit(1)

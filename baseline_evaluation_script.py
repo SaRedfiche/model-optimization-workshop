@@ -19,6 +19,7 @@ import numpy as np
 import logging
 import traceback
 import sys
+import time
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import AutoModelForTokenClassification, AutoModelForQuestionAnswering
 from transformers import AutoModelForMaskedLM
@@ -63,17 +64,15 @@ def measure_inference_time(model, inputs, num_runs=10):
     for _ in range(num_runs):
         if torch.cuda.is_available():
             start_event.record()
-        else:
-            start_time = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() else None
-        
-        with torch.no_grad():
-            model(**inputs)
-        
-        if torch.cuda.is_available():
+            with torch.no_grad():
+                model(**inputs)
             end_event.record()
             torch.cuda.synchronize()
             inference_times.append(start_event.elapsed_time(end_event))
         else:
+            start_time = time.time()
+            with torch.no_grad():
+                model(**inputs)
             end_time = time.time()
             inference_times.append((end_time - start_time) * 1000)  # Convert to ms
     
@@ -178,42 +177,39 @@ def evaluate_model(model_key, model_info, output_dir):
     
     return metrics
 
-def main():
-    parser = argparse.ArgumentParser(description="Baseline evaluation script")
-    parser.add_argument("--model-info-path", type=str, required=True, help="Path to model info JSON file")
-    parser.add_argument("--output-dir", type=str, required=True, help="Output directory for metrics")
-    args = parser.parse_args()
-    
-    try:
-        # Load model info
-        logger.info(f"Loading model info from {args.model_info_path}")
-        with open(args.model_info_path, "r") as f:
-            model_info = json.load(f)
-        
-        # Create output directory if it doesn't exist
-        os.makedirs(args.output_dir, exist_ok=True)
-        
-        # Evaluate each model
-        all_metrics = {}
-        for model_key, info in model_info.items():
-            try:
-                metrics = evaluate_model(model_key, info, args.output_dir)
-                all_metrics[model_key] = metrics
-            except Exception as e:
-                logger.error(f"Error evaluating model {model_key}: {e}")
-                logger.error(traceback.format_exc())
-        
-        # Save all metrics to a single file
-        metrics_path = os.path.join(args.output_dir, "baseline_metrics.json")
-        with open(metrics_path, "w") as f:
-            json.dump(all_metrics, f, indent=2)
-        
-        logger.info(f"Saved baseline metrics to {metrics_path}")
-    
-    except Exception as e:
-        logger.error(f"Error in baseline evaluation: {e}")
-        logger.error(traceback.format_exc())
-        sys.exit(1)
+# Parse command-line arguments
+parser = argparse.ArgumentParser(description="Baseline evaluation script")
+parser.add_argument("--model-info-path", type=str, required=True, help="Path to model info JSON file")
+parser.add_argument("--output-dir", type=str, required=True, help="Output directory for metrics")
+args = parser.parse_args()
 
-if __name__ == "__main__":
-    main()
+try:
+    # Load model info
+    logger.info(f"Loading model info from {args.model_info_path}")
+    with open(args.model_info_path, "r") as f:
+        model_info = json.load(f)
+    
+    # Create output directory if it doesn't exist
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Evaluate each model
+    all_metrics = {}
+    for model_key, info in model_info.items():
+        try:
+            metrics = evaluate_model(model_key, info, args.output_dir)
+            all_metrics[model_key] = metrics
+        except Exception as e:
+            logger.error(f"Error evaluating model {model_key}: {e}")
+            logger.error(traceback.format_exc())
+    
+    # Save all metrics to a single file
+    metrics_path = os.path.join(args.output_dir, "baseline_metrics.json")
+    with open(metrics_path, "w") as f:
+        json.dump(all_metrics, f, indent=2)
+    
+    logger.info(f"Saved baseline metrics to {metrics_path}")
+
+except Exception as e:
+    logger.error(f"Error in baseline evaluation: {e}")
+    logger.error(traceback.format_exc())
+    sys.exit(1)
