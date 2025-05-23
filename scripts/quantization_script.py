@@ -80,26 +80,44 @@ try:
     
     # Configure quantization
     logger.info(f"Configuring {args.bits}-bit {args.quantization_approach} quantization...")
+    
+    # Use simpler quantization configuration to avoid LRScheduler dependency
     if args.quantization_approach == "dynamic":
-        quantization_config = AutoQuantizationConfig.avx512_dynamic(
-            is_static=False, 
+        from optimum.onnxruntime.configuration import OnnxQuantizationConfig
+        quantization_config = OnnxQuantizationConfig(
+            is_static=False,
+            format="QOperator" if args.bits == 8 else "QDQ",
+            mode="IntegerOps",
+            activations_dtype="uint8",
+            weights_dtype="int8" if args.bits == 8 else "int4",
             per_channel=False,
             reduce_range=False,
-            weight_dtype="int8" if args.bits == 8 else "int4"
+            operators_to_quantize=["MatMul", "Attention"]
         )
     elif args.quantization_approach == "static":
-        quantization_config = AutoQuantizationConfig.avx512_static(
+        from optimum.onnxruntime.configuration import OnnxQuantizationConfig
+        quantization_config = OnnxQuantizationConfig(
             is_static=True,
+            format="QOperator" if args.bits == 8 else "QDQ",
+            mode="IntegerOps",
+            activations_dtype="uint8",
+            weights_dtype="int8" if args.bits == 8 else "int4",
             per_channel=False,
             reduce_range=False,
-            weight_dtype="int8" if args.bits == 8 else "int4"
+            operators_to_quantize=["MatMul", "Attention"]
         )
-    else:  # aware_training
-        quantization_config = AutoQuantizationConfig.qat(
-            is_static=True,
+    else:  # aware_training - fallback to dynamic as QAT requires more setup
+        logger.warning("QAT requires more setup, falling back to dynamic quantization")
+        from optimum.onnxruntime.configuration import OnnxQuantizationConfig
+        quantization_config = OnnxQuantizationConfig(
+            is_static=False,
+            format="QOperator" if args.bits == 8 else "QDQ",
+            mode="IntegerOps",
+            activations_dtype="uint8",
+            weights_dtype="int8" if args.bits == 8 else "int4",
             per_channel=False,
             reduce_range=False,
-            weight_dtype="int8" if args.bits == 8 else "int4"
+            operators_to_quantize=["MatMul", "Attention"]
         )
     
     # Create quantizer
