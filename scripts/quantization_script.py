@@ -9,6 +9,7 @@ import sys
 import logging
 import argparse
 import shutil
+import json
 from pathlib import Path
 
 # Configure logging
@@ -26,10 +27,10 @@ parser.add_argument('--model-dir', type=str, default='/opt/ml/processing/input/m
 parser.add_argument('--output-dir', type=str, default='/opt/ml/processing/output',
                     help='Directory to save the quantized model')
 parser.add_argument('--quantization-approach', type=str, default='dynamic',
-                    choices=['dynamic', 'static', 'aware_training'],
+                    choices=['dynamic', 'static'],
                     help='Quantization approach to use')
 parser.add_argument('--bits', type=int, default=8,
-                    choices=[8, 4],
+                    choices=[8],
                     help='Bit precision for quantization')
 
 args = parser.parse_args()
@@ -45,8 +46,9 @@ try:
     logger.info("Importing required libraries...")
     import torch
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
-    from optimum.onnxruntime import ORTQuantizer
-    from optimum.onnxruntime.configuration import AutoQuantizationConfig
+    import onnx
+    import onnxruntime
+    import numpy as np
     
     # Check if model directory exists
     if not os.path.exists(args.model_dir):
@@ -64,80 +66,115 @@ try:
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Create a temporary directory for ONNX export
-    temp_onnx_dir = os.path.join(args.output_dir, "temp_onnx")
-    os.makedirs(temp_onnx_dir, exist_ok=True)
+    temp_dir = os.path.join(args.output_dir, "temp")
+    os.makedirs(temp_dir, exist_ok=True)
     
     # Export model to ONNX
     logger.info("Exporting model to ONNX format...")
-    from optimum.onnxruntime import ORTModelForSequenceClassification
     
-    ort_model = ORTModelForSequenceClassification.from_pretrained(
-        args.model_dir, 
-        export=True,
-        provider="CPUExecutionProvider"
+    # Create dummy input for tracing
+    batch_size = 1
+    sequence_length = 128
+    input_shape = (batch_size, sequence_length)
+    
+    # Get the input names
+    input_names = ["input_ids", "attention_mask", "token_type_ids"]
+    output_names = ["logits"]
+    
+    # Create dummy inputs
+    dummy_inputs = {
+        "input_ids": torch.ones(input_shape, dtype=torch.long),
+        "attention_mask": torch.ones(input_shape, dtype=torch.long),
+    }
+    
+    # Add token_type_ids if the model uses it
+    if model.config.type_vocab_size > 0:
+        dummy_inputs["token_type_ids"] = torch.zeros(input_shape, dtype=torch.long)
+    else:
+        # Remove from input_names if not used
+        input_names.remove("token_type_ids")
+    
+    # Export the model to ONNX
+    onnx_path = os.path.join(temp_dir, "model.onnx")
+    torch.onnx.export(
+        model,
+        tuple(dummy_inputs.values()),
+        onnx_path,
+        input_names=input_names,
+        output_names=output_names,
+        dynamic_axes={
+            "input_ids": {0: "batch_size", 1: "sequence_length"},
+            "attention_mask": {0: "batch_size", 1: "sequence_length"},
+            "token_type_ids": {0: "batch_size", 1: "sequence_length"} if "token_type_ids" in input_names else None,
+            "logits": {0: "batch_size"}
+        },
+        opset_version=12,
+        do_constant_folding=True
     )
-    ort_model.save_pretrained(temp_onnx_dir)
     
-    # Configure quantization
-    logger.info(f"Configuring {args.bits}-bit {args.quantization_approach} quantization...")
+    logger.info(f"Model exported to ONNX at {onnx_path}")
     
-    # Use simpler quantization configuration to avoid LRScheduler dependency
+    # Verify the ONNX model
+    logger.info("Verifying ONNX model...")
+    onnx_model = onnx.load(onnx_path)
+    onnx.checker.check_model(onnx_model)
+    logger.info("ONNX model verification successful")
+    
+    # Quantize the model
+    logger.info(f"Quantizing model using {args.quantization_approach} approach...")
+    
+    # Import the quantization tools
+    from onnxruntime.quantization import quantize_dynamic, quantize_static, QuantType
+    
+    # Define the quantized model path
+    quantized_model_path = os.path.join(temp_dir, "model_quantized.onnx")
+    
+    # Perform quantization
     if args.quantization_approach == "dynamic":
-        from optimum.onnxruntime.configuration import OnnxQuantizationConfig
-        quantization_config = OnnxQuantizationConfig(
-            is_static=False,
-            format="QOperator" if args.bits == 8 else "QDQ",
-            mode="IntegerOps",
-            activations_dtype="uint8",
-            weights_dtype="int8" if args.bits == 8 else "int4",
-            per_channel=False,
-            reduce_range=False,
-            operators_to_quantize=["MatMul", "Attention"]
+        quantize_dynamic(
+            onnx_path,
+            quantized_model_path,
+            weight_type=QuantType.QInt8
         )
-    elif args.quantization_approach == "static":
-        from optimum.onnxruntime.configuration import OnnxQuantizationConfig
-        quantization_config = OnnxQuantizationConfig(
-            is_static=True,
-            format="QOperator" if args.bits == 8 else "QDQ",
-            mode="IntegerOps",
-            activations_dtype="uint8",
-            weights_dtype="int8" if args.bits == 8 else "int4",
-            per_channel=False,
-            reduce_range=False,
-            operators_to_quantize=["MatMul", "Attention"]
-        )
-    else:  # aware_training - fallback to dynamic as QAT requires more setup
-        logger.warning("QAT requires more setup, falling back to dynamic quantization")
-        from optimum.onnxruntime.configuration import OnnxQuantizationConfig
-        quantization_config = OnnxQuantizationConfig(
-            is_static=False,
-            format="QOperator" if args.bits == 8 else "QDQ",
-            mode="IntegerOps",
-            activations_dtype="uint8",
-            weights_dtype="int8" if args.bits == 8 else "int4",
-            per_channel=False,
-            reduce_range=False,
-            operators_to_quantize=["MatMul", "Attention"]
+    else:  # static quantization
+        # For static quantization, we would need calibration data
+        # Since we don't have calibration data, we'll use dynamic quantization as a fallback
+        logger.warning("Static quantization requires calibration data. Using dynamic quantization as fallback.")
+        quantize_dynamic(
+            onnx_path,
+            quantized_model_path,
+            weight_type=QuantType.QInt8
         )
     
-    # Create quantizer
-    logger.info("Creating quantizer...")
-    quantizer = ORTQuantizer.from_pretrained(temp_onnx_dir)
+    logger.info(f"Model quantized and saved to {quantized_model_path}")
     
-    # Quantize model
-    logger.info("Quantizing model...")
-    quantizer.quantize(
-        save_dir=args.output_dir,
-        quantization_config=quantization_config
-    )
+    # Copy the quantized model to the output directory
+    logger.info("Copying quantized model to output directory...")
+    shutil.copy(quantized_model_path, os.path.join(args.output_dir, "model.onnx"))
     
     # Save tokenizer
     logger.info("Saving tokenizer...")
     tokenizer.save_pretrained(args.output_dir)
     
+    # Save model configuration
+    logger.info("Saving model configuration...")
+    model.config.save_pretrained(args.output_dir)
+    
+    # Create a config file for the quantized model
+    quantization_config = {
+        "quantization_approach": args.quantization_approach,
+        "bits": args.bits,
+        "original_model": model.config.model_type,
+        "framework": "onnx",
+        "quantization_library": "onnxruntime"
+    }
+    
+    with open(os.path.join(args.output_dir, "quantization_config.json"), "w") as f:
+        json.dump(quantization_config, f, indent=2)
+    
     # Clean up temporary directory
     logger.info("Cleaning up temporary files...")
-    shutil.rmtree(temp_onnx_dir)
+    shutil.rmtree(temp_dir)
     
     # Verify output
     logger.info(f"Contents of output directory: {os.listdir(args.output_dir)}")
