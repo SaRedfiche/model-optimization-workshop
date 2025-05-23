@@ -77,8 +77,11 @@ try:
     sequence_length = 128
     input_shape = (batch_size, sequence_length)
     
-    # Get the input names
-    input_names = ["input_ids", "attention_mask", "token_type_ids"]
+    # Determine input features based on model architecture
+    logger.info(f"Model architecture: {model.config.model_type}")
+    
+    # Default input names
+    input_names = ["input_ids", "attention_mask"]
     output_names = ["logits"]
     
     # Create dummy inputs
@@ -87,27 +90,34 @@ try:
         "attention_mask": torch.ones(input_shape, dtype=torch.long),
     }
     
-    # Add token_type_ids if the model uses it
-    if model.config.type_vocab_size > 0:
+    # Add token_type_ids for models that use it (like BERT, but not DistilBERT)
+    # Check if the model architecture is known to use token_type_ids
+    if model.config.model_type.lower() in ["bert", "electra", "albert"]:
+        input_names.append("token_type_ids")
         dummy_inputs["token_type_ids"] = torch.zeros(input_shape, dtype=torch.long)
-    else:
-        # Remove from input_names if not used
-        input_names.remove("token_type_ids")
     
     # Export the model to ONNX
     onnx_path = os.path.join(temp_dir, "model.onnx")
+    
+    # Create dynamic axes dictionary
+    dynamic_axes = {
+        "input_ids": {0: "batch_size", 1: "sequence_length"},
+        "attention_mask": {0: "batch_size", 1: "sequence_length"},
+        "logits": {0: "batch_size"}
+    }
+    
+    # Add token_type_ids dynamic axes if it's in the inputs
+    if "token_type_ids" in input_names:
+        dynamic_axes["token_type_ids"] = {0: "batch_size", 1: "sequence_length"}
+    
+    # Export to ONNX
     torch.onnx.export(
         model,
         tuple(dummy_inputs.values()),
         onnx_path,
         input_names=input_names,
         output_names=output_names,
-        dynamic_axes={
-            "input_ids": {0: "batch_size", 1: "sequence_length"},
-            "attention_mask": {0: "batch_size", 1: "sequence_length"},
-            "token_type_ids": {0: "batch_size", 1: "sequence_length"} if "token_type_ids" in input_names else None,
-            "logits": {0: "batch_size"}
-        },
+        dynamic_axes=dynamic_axes,
         opset_version=12,
         do_constant_folding=True
     )
