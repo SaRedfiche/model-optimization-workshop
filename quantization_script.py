@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Quantization script for model optimization workshop.
 This script applies quantization to transformer models and measures performance metrics.
@@ -164,133 +165,127 @@ parser.add_argument("--quantization-bits", type=int, default=8,
                     help="Number of bits for quantization")
 args = parser.parse_args()
 
-try:
-    # Load model info
-    logger.info(f"Loading model info from {args.model_info_path}")
-    with open(args.model_info_path, "r") as f:
-        model_info = json.load(f)
-    
-    # Create output directory if it doesn't exist
-    os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Process each model
-    all_metrics = {}
-    for model_key, info in model_info.items():
-        try:
-            logger.info(f"Processing model: {model_key}")
-            save_checkpoint(args.output_dir, model_key, 1, "Starting quantization process")
-            
-            model_name = info["model_name"]
-            task = info["task"]
-            
-            # Set device
-            device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-            logger.info(f"Using device: {device}")
-            
-            # Load tokenizer
-            logger.info(f"Loading tokenizer: {model_name}")
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-            
-            # Load model based on task
-            logger.info(f"Loading model: {model_name} for task: {task}")
-            save_checkpoint(args.output_dir, model_key, 2, f"Loading model {model_name}")
-            
-            if task == "text-classification":
-                model = AutoModelForSequenceClassification.from_pretrained(model_name)
-            elif task == "token-classification":
-                model = AutoModelForTokenClassification.from_pretrained(model_name)
-            elif task == "question-answering":
-                model = AutoModelForQuestionAnswering.from_pretrained(model_name)
-            elif task == "fill-mask":
-                model = AutoModelForMaskedLM.from_pretrained(model_name)
-            else:
-                raise ValueError(f"Unsupported task: {task}")
-            
-            model = model.to(device)
-            model.eval()
-            
-            # Prepare sample inputs
-            inputs = prepare_sample_inputs(model_name, task, tokenizer, device)
-            
-            # Measure baseline metrics before quantization
-            baseline_size = get_model_size(model)
-            baseline_params = get_num_parameters(model)
-            baseline_inference_time = measure_inference_time(model, inputs)
-            
-            logger.info(f"Baseline model size: {baseline_size:.2f} MB")
-            logger.info(f"Baseline parameters: {baseline_params:,}")
-            logger.info(f"Baseline inference time: {baseline_inference_time:.2f} ms")
-            
-            save_checkpoint(args.output_dir, model_key, 3, "Applying quantization")
-            
-            # Apply quantization based on method
-            if args.quantization_method == "dynamic":
-                quantized_model = apply_dynamic_quantization(model, args.quantization_bits)
-            elif args.quantization_method == "static":
-                quantized_model = apply_static_quantization(model, args.quantization_bits)
-            elif args.quantization_method == "qat":
-                quantized_model = apply_quantization_aware_training(model, args.quantization_bits)
-            else:
-                raise ValueError(f"Unsupported quantization method: {args.quantization_method}")
-            
-            # Measure metrics after quantization
-            quantized_size = get_model_size(quantized_model)
-            quantized_params = get_num_parameters(quantized_model)
-            quantized_inference_time = measure_inference_time(quantized_model, inputs)
-            
-            logger.info(f"Quantized model size: {quantized_size:.2f} MB")
-            logger.info(f"Quantized parameters: {quantized_params:,}")
-            logger.info(f"Quantized inference time: {quantized_inference_time:.2f} ms")
-            
-            # Calculate improvements
-            size_reduction = (baseline_size - quantized_size) / baseline_size * 100
-            time_improvement = (baseline_inference_time - quantized_inference_time) / baseline_inference_time * 100
-            
-            logger.info(f"Size reduction: {size_reduction:.2f}%")
-            logger.info(f"Inference time improvement: {time_improvement:.2f}%")
-            
-            save_checkpoint(args.output_dir, model_key, 4, "Saving quantized model")
-            
-            # Save metrics
-            metrics = {
-                "model_name": model_name,
-                "task": task,
-                "quantization_method": args.quantization_method,
-                "quantization_bits": args.quantization_bits,
-                "baseline_size_mb": round(baseline_size, 2),
-                "baseline_parameters": baseline_params,
-                "baseline_inference_time_ms": round(baseline_inference_time, 2),
-                "quantized_size_mb": round(quantized_size, 2),
-                "quantized_parameters": quantized_params,
-                "quantized_inference_time_ms": round(quantized_inference_time, 2),
-                "size_reduction_percent": round(size_reduction, 2),
-                "time_improvement_percent": round(time_improvement, 2)
-            }
-            
-            all_metrics[model_key] = metrics
-            
-            # Save quantized model
-            model_dir = os.path.join(args.output_dir, f"{model_key}_quantized")
-            os.makedirs(model_dir, exist_ok=True)
-            quantized_model.save_pretrained(model_dir)
-            tokenizer.save_pretrained(model_dir)
-            logger.info(f"Saved quantized model to {model_dir}")
-            
-            save_checkpoint(args.output_dir, model_key, 5, "Quantization complete")
-            
-        except Exception as e:
-            logger.error(f"Error processing model {model_key}: {e}")
-            logger.error(traceback.format_exc())
-            save_checkpoint(args.output_dir, model_key, "error", f"Error: {str(e)}")
-    
-    # Save all metrics to a single file
-    metrics_path = os.path.join(args.output_dir, "quantization_metrics.json")
-    with open(metrics_path, "w") as f:
-        json.dump(all_metrics, f, indent=2)
-    
-    logger.info(f"Saved quantization metrics to {metrics_path}")
+# Load model info
+logger.info(f"Loading model info from {args.model_info_path}")
+with open(args.model_info_path, "r") as f:
+    model_info = json.load(f)
 
-except Exception as e:
-    logger.error(f"Error in quantization: {e}")
-    logger.error(traceback.format_exc())
-    sys.exit(1)
+# Create output directory if it doesn't exist
+os.makedirs(args.output_dir, exist_ok=True)
+
+# Process each model
+all_metrics = {}
+for model_key, info in model_info.items():
+    try:
+        logger.info(f"Processing model: {model_key}")
+        save_checkpoint(args.output_dir, model_key, 1, "Starting quantization process")
+        
+        model_name = info["model_name"]
+        task = info["task"]
+        
+        # Set device
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        logger.info(f"Using device: {device}")
+        
+        # Load tokenizer
+        logger.info(f"Loading tokenizer: {model_name}")
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        
+        # Load model based on task
+        logger.info(f"Loading model: {model_name} for task: {task}")
+        save_checkpoint(args.output_dir, model_key, 2, f"Loading model {model_name}")
+        
+        if task == "text-classification":
+            model = AutoModelForSequenceClassification.from_pretrained(model_name)
+        elif task == "token-classification":
+            model = AutoModelForTokenClassification.from_pretrained(model_name)
+        elif task == "question-answering":
+            model = AutoModelForQuestionAnswering.from_pretrained(model_name)
+        elif task == "fill-mask":
+            model = AutoModelForMaskedLM.from_pretrained(model_name)
+        else:
+            raise ValueError(f"Unsupported task: {task}")
+        
+        model = model.to(device)
+        model.eval()
+        
+        # Prepare sample inputs
+        inputs = prepare_sample_inputs(model_name, task, tokenizer, device)
+        
+        # Measure baseline metrics before quantization
+        baseline_size = get_model_size(model)
+        baseline_params = get_num_parameters(model)
+        baseline_inference_time = measure_inference_time(model, inputs)
+        
+        logger.info(f"Baseline model size: {baseline_size:.2f} MB")
+        logger.info(f"Baseline parameters: {baseline_params:,}")
+        logger.info(f"Baseline inference time: {baseline_inference_time:.2f} ms")
+        
+        save_checkpoint(args.output_dir, model_key, 3, "Applying quantization")
+        
+        # Apply quantization based on method
+        if args.quantization_method == "dynamic":
+            quantized_model = apply_dynamic_quantization(model, args.quantization_bits)
+        elif args.quantization_method == "static":
+            quantized_model = apply_static_quantization(model, args.quantization_bits)
+        elif args.quantization_method == "qat":
+            quantized_model = apply_quantization_aware_training(model, args.quantization_bits)
+        else:
+            raise ValueError(f"Unsupported quantization method: {args.quantization_method}")
+        
+        # Measure metrics after quantization
+        quantized_size = get_model_size(quantized_model)
+        quantized_params = get_num_parameters(quantized_model)
+        quantized_inference_time = measure_inference_time(quantized_model, inputs)
+        
+        logger.info(f"Quantized model size: {quantized_size:.2f} MB")
+        logger.info(f"Quantized parameters: {quantized_params:,}")
+        logger.info(f"Quantized inference time: {quantized_inference_time:.2f} ms")
+        
+        # Calculate improvements
+        size_reduction = (baseline_size - quantized_size) / baseline_size * 100
+        time_improvement = (baseline_inference_time - quantized_inference_time) / baseline_inference_time * 100
+        
+        logger.info(f"Size reduction: {size_reduction:.2f}%")
+        logger.info(f"Inference time improvement: {time_improvement:.2f}%")
+        
+        save_checkpoint(args.output_dir, model_key, 4, "Saving quantized model")
+        
+        # Save metrics
+        metrics = {
+            "model_name": model_name,
+            "task": task,
+            "quantization_method": args.quantization_method,
+            "quantization_bits": args.quantization_bits,
+            "baseline_size_mb": round(baseline_size, 2),
+            "baseline_parameters": baseline_params,
+            "baseline_inference_time_ms": round(baseline_inference_time, 2),
+            "quantized_size_mb": round(quantized_size, 2),
+            "quantized_parameters": quantized_params,
+            "quantized_inference_time_ms": round(quantized_inference_time, 2),
+            "size_reduction_percent": round(size_reduction, 2),
+            "time_improvement_percent": round(time_improvement, 2)
+        }
+        
+        all_metrics[model_key] = metrics
+        
+        # Save quantized model
+        model_dir = os.path.join(args.output_dir, f"{model_key}_quantized")
+        os.makedirs(model_dir, exist_ok=True)
+        quantized_model.save_pretrained(model_dir)
+        tokenizer.save_pretrained(model_dir)
+        logger.info(f"Saved quantized model to {model_dir}")
+        
+        save_checkpoint(args.output_dir, model_key, 5, "Quantization complete")
+        
+    except Exception as e:
+        logger.error(f"Error processing model {model_key}: {e}")
+        logger.error(traceback.format_exc())
+        save_checkpoint(args.output_dir, model_key, "error", f"Error: {str(e)}")
+
+# Save all metrics to a single file
+metrics_path = os.path.join(args.output_dir, "quantization_metrics.json")
+with open(metrics_path, "w") as f:
+    json.dump(all_metrics, f, indent=2)
+
+logger.info(f"Saved quantization metrics to {metrics_path}")
