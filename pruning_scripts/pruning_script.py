@@ -236,8 +236,24 @@ args = parser.parse_args()
 try:
     # Load model info
     logger.info(f"Loading model info from {args.model_info_path}")
-    with open(args.model_info_path, "r") as f:
-        model_info = json.load(f)
+    # Check if model_info_path is a directory
+    if os.path.isdir(args.model_info_path):
+        # List files in the directory
+        logger.info(f"model_info_path is a directory. Contents: {os.listdir(args.model_info_path)}")
+        # Try to find a JSON file
+        json_files = [f for f in os.listdir(args.model_info_path) if f.endswith('.json')]
+        if json_files:
+            # Use the first JSON file found
+            model_info_file = os.path.join(args.model_info_path, json_files[0])
+            logger.info(f"Using JSON file: {model_info_file}")
+            with open(model_info_file, "r") as f:
+                model_info = json.load(f)
+        else:
+            raise FileNotFoundError(f"No JSON files found in directory: {args.model_info_path}")
+    else:
+        # It's a file, load it directly
+        with open(args.model_info_path, "r") as f:
+            model_info = json.load(f)
     
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
