@@ -1,0 +1,9 @@
+torch==2.0.0
+transformers==4.30.2
+datasets==2.13.1
+numpy>=1.24.0
+scikit-learn>=1.2.2
+tqdm>=4.65.0
+accelerate>=0.20.3
+psutil>=5.9.5
+boto3>=1.26.0

@@ -52,5 +52,5 @@ ENV/
 # Utility scripts
 scripts/utils/
 
-# Wanda scripts (temporary)
-wanda_pruning_scripts/
+# No longer ignoring wanda_pruning_scripts
+# wanda_pruning_scripts/
