@@ -2,3 +2,7 @@ transformers==4.26.0
 torch==2.1.0
 numpy==1.22.0
 datasets==2.10.0
+torch-pruning==0.2.8
+neural-compressor==1.12.0
+onnx==1.13.0
+onnxruntime==1.13.1
