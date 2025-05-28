@@ -24,6 +24,9 @@ var/
 backups/
 *.bak
 
+# Development checklists and notes
+wanda_notebook_checklist.md
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
