@@ -20,6 +20,10 @@ var/
 .installed.cfg
 *.egg
 
+# Backup files
+backups/
+*.bak
+
 # Jupyter Notebook
 .ipynb_checkpoints
 
@@ -44,3 +48,6 @@ ENV/
 
 # Utility scripts
 scripts/utils/
+
+# Wanda scripts (temporary)
+wanda_pruning_scripts/
