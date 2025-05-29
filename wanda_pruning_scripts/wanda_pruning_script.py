@@ -64,7 +64,7 @@ def load_model_and_tokenizer(model_info):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     
     # Load model based on task
-    if task == "text-classification" or task == "sentiment-analysis":
+    if task == "text-classification" or task == "sequence-classification" or task == "sentiment-analysis":
         model = AutoModelForSequenceClassification.from_pretrained(model_name)
     elif task == "token-classification" or task == "ner":
         model = AutoModelForTokenClassification.from_pretrained(model_name)
@@ -275,7 +275,12 @@ def main():
     # Measure baseline metrics
     baseline_size = measure_model_size(model)
     baseline_time = measure_inference_time(model, inputs)
-    baseline_memory = measure_memory_usage(model, inputs)
+    
+    try:
+        baseline_memory = measure_memory_usage(model, inputs)
+    except Exception as e:
+        print(f"Warning: Could not measure baseline memory usage: {e}")
+        baseline_memory = 0
     
     print(f"Baseline metrics - Size: {baseline_size:.2f} MB, Inference time: {baseline_time:.2f} ms")
     
@@ -290,12 +295,17 @@ def main():
     # Measure pruned metrics
     pruned_size = measure_model_size(model)
     pruned_time = measure_inference_time(model, inputs)
-    pruned_memory = measure_memory_usage(model, inputs)
+    
+    try:
+        pruned_memory = measure_memory_usage(model, inputs)
+    except Exception as e:
+        print(f"Warning: Could not measure pruned memory usage: {e}")
+        pruned_memory = 0
     
     # Calculate improvements
-    size_reduction = (baseline_size - pruned_size) / baseline_size * 100
-    time_improvement = (baseline_time - pruned_time) / baseline_time * 100
-    memory_reduction = (baseline_memory - pruned_memory) / baseline_memory * 100
+    size_reduction = (baseline_size - pruned_size) / baseline_size * 100 if baseline_size > 0 else 0
+    time_improvement = (baseline_time - pruned_time) / baseline_time * 100 if baseline_time > 0 else 0
+    memory_reduction = (baseline_memory - pruned_memory) / baseline_memory * 100 if baseline_memory > 0 else 0
     
     print(f"Pruned metrics - Size: {pruned_size:.2f} MB, Inference time: {pruned_time:.2f} ms")
     print(f"Improvements - Size: {size_reduction:.2f}%, Time: {time_improvement:.2f}%")
