@@ -306,7 +306,7 @@ def main():
         }
     }
     
-    with open(os.path.join(args.output_dir, "wanda_pruned_metrics.json"), "w") as f:
+    with open(os.path.join(args.output_dir, "wanda-pruned-metrics.json"), "w") as f:  # Using hyphens instead of underscores
         json.dump(metrics, f, indent=2)
     
     print("WANDA pruning completed successfully!")

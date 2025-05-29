@@ -273,7 +273,7 @@ try:
             logger.error(traceback.format_exc())
     
     # Save all metrics to a single file
-    metrics_path = os.path.join(args.output_dir, "distilled_metrics.json")
+    metrics_path = os.path.join(args.output_dir, "distilled-metrics.json")  # Using hyphen instead of underscore
     with open(metrics_path, "w") as f:
         json.dump(all_metrics, f, indent=2)
     
