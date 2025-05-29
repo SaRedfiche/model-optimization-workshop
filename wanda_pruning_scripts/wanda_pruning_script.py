@@ -128,7 +128,9 @@ def collect_activation_statistics(model, inputs):
                 # Take the first element if input is a tuple
                 act = input[0].detach().abs().mean(dim=0)
                 if name in activations:
-                    activations[name] = torch.max(activations[name], act)
+                    # Make sure dimensions match before taking max
+                    if activations[name].shape == act.shape:
+                        activations[name] = torch.max(activations[name], act)
                 else:
                     activations[name] = act
         return hook
@@ -167,14 +169,20 @@ def wanda_pruning(model, activations, pruning_amount):
             if name in activations:
                 act_stats = activations[name]
                 
-                # Expand dimensions to match weight shape
-                if act_stats.dim() == 1:
+                # Check if dimensions match
+                if act_stats.dim() == 1 and act_stats.size(0) == weight.size(1):
+                    # Expand dimensions to match weight shape
                     act_stats = act_stats.unsqueeze(0).expand(weight.size(0), -1)
-                
-                # Calculate importance scores (weight magnitude × activation magnitude)
-                importance = weight.abs() * act_stats
+                    
+                    # Calculate importance scores (weight magnitude × activation magnitude)
+                    importance = weight.abs() * act_stats
+                else:
+                    # Fallback to simple magnitude pruning if dimensions don't match
+                    print(f"Warning: Activation shape {act_stats.shape} doesn't match weight shape {weight.shape} for {name}. Using magnitude pruning instead.")
+                    importance = weight.abs()
             else:
                 # Fallback to simple magnitude pruning if no activation stats
+                print(f"Warning: No activation statistics found for {name}. Using magnitude pruning instead.")
                 importance = weight.abs()
             
             # Determine threshold for pruning
