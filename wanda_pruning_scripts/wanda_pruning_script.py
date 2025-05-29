@@ -99,7 +99,7 @@ def generate_calibration_data(tokenizer, task, num_samples=32):
     calibration_texts = calibration_texts[:num_samples]
     
     # Tokenize based on task
-    if task == "text-classification" or task == "sentiment-analysis":
+    if task == "text-classification" or task == "sentiment-analysis" or task == "sequence-classification":
         inputs = tokenizer(calibration_texts, padding=True, truncation=True, return_tensors="pt")
     elif task == "token-classification" or task == "ner":
         inputs = tokenizer(calibration_texts, padding=True, truncation=True, return_tensors="pt")
