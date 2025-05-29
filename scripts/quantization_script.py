@@ -179,7 +179,7 @@ try:
         "quantization_library": "onnxruntime"
     }
     
-    with open(os.path.join(args.output_dir, "quantization_config.json"), "w") as f:
+    with open(os.path.join(args.output_dir, "quantization-config.json"), "w") as f:  # Using hyphen instead of underscore
         json.dump(quantization_config, f, indent=2)
     
     # Clean up temporary directory
