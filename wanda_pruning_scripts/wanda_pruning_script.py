@@ -185,8 +185,17 @@ def wanda_pruning(model, activations, pruning_amount):
                 print(f"Warning: No activation statistics found for {name}. Using magnitude pruning instead.")
                 importance = weight.abs()
             
-            # Determine threshold for pruning
-            threshold = torch.quantile(importance.view(-1), pruning_amount)
+            # Determine threshold for pruning - handle large tensors
+            try:
+                # Try using torch.quantile first (faster)
+                threshold = torch.quantile(importance.view(-1), pruning_amount)
+            except RuntimeError:
+                # If tensor is too large, use a different approach
+                print(f"Warning: Tensor too large for quantile. Using alternative method for {name}.")
+                flattened = importance.view(-1).detach().cpu().numpy()
+                k = int(flattened.size * pruning_amount)
+                threshold = float(np.partition(flattened, k)[k])
+                threshold = torch.tensor(threshold, device=importance.device)
             
             # Create pruning mask
             mask = importance > threshold
