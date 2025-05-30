@@ -22,6 +22,10 @@ from transformers import DistilBertForSequenceClassification, DistilBertForToken
 from transformers import DistilBertForQuestionAnswering, DistilBertForMaskedLM
 from transformers import Trainer, TrainingArguments
 from datasets import load_dataset
+from transformers import DistilBertForSequenceClassification, DistilBertForTokenClassification
+from transformers import DistilBertForQuestionAnswering, DistilBertForMaskedLM
+from transformers import Trainer, TrainingArguments
+from datasets import load_dataset
 
 # Configure logging
 logging.basicConfig(
@@ -291,10 +295,29 @@ try:
     
     # Save all metrics to a single file
     metrics_path = os.path.join(args.output_dir, "distilled-metrics.json")  # Using hyphen instead of underscore
+    
+    # Debug the metrics content
+    logger.info(f"Metrics content before saving: {all_metrics}")
+    
+    # Ensure the output directory exists
+    os.makedirs(args.output_dir, exist_ok=True)
+    
     with open(metrics_path, "w") as f:
         json.dump(all_metrics, f, indent=2)
     
     logger.info(f"Saved distillation metrics to {metrics_path}")
+    
+    # Double-check the file was created and has content
+    if os.path.exists(metrics_path):
+        file_size = os.path.getsize(metrics_path)
+        logger.info(f"Metrics file created successfully. Size: {file_size} bytes")
+        
+        # Read back the file to verify content
+        with open(metrics_path, "r") as f:
+            content = f.read()
+            logger.info(f"File content preview: {content[:200]}...")
+    else:
+        logger.error(f"Failed to create metrics file at {metrics_path}")
 
 except Exception as e:
     logger.error(f"Error in knowledge distillation: {e}")
