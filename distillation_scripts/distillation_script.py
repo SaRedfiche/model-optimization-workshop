@@ -154,7 +154,8 @@ def create_student_model(task, teacher_model):
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Knowledge distillation script")
-parser.add_argument("--model-info-path", type=str, required=True, help="Path to model info JSON file")
+parser.add_argument("--teacher-info-path", type=str, required=True, help="Path to teacher model info JSON file")
+parser.add_argument("--student-info-path", type=str, required=True, help="Path to student architecture JSON file")
 parser.add_argument("--output-dir", type=str, required=True, help="Output directory for metrics and models")
 parser.add_argument("--epochs", type=int, default=3, help="Number of training epochs")
 parser.add_argument("--batch-size", type=int, default=16, help="Training batch size")
@@ -163,10 +164,15 @@ parser.add_argument("--alpha", type=float, default=0.5, help="Weight for distill
 args = parser.parse_args()
 
 try:
-    # Load model info
-    logger.info(f"Loading model info from {args.model_info_path}")
-    with open(args.model_info_path, "r") as f:
+    # Load teacher model info
+    logger.info(f"Loading teacher model info from {args.teacher_info_path}")
+    with open(args.teacher_info_path, "r") as f:
         model_info = json.load(f)
+    
+    # Load student architecture info
+    logger.info(f"Loading student architecture info from {args.student_info_path}")
+    with open(args.student_info_path, "r") as f:
+        student_architectures = json.load(f)
     
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
