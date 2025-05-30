@@ -291,12 +291,6 @@ try:
             student_inference_time = measure_inference_time(student_model, inputs)
             student_memory_usage = measure_memory_usage(student_model, inputs)
             
-            # Train the student model and evaluate accuracy
-            logger.info("Training and evaluating student model")
-            accuracy = train_student_model(teacher_model, student_model, tokenizer, task, device, args, logger)
-            logger.info(f"Student model accuracy: {accuracy:.4f}")
-
-            
             logger.info(f"Student model size: {student_size:.2f} MB")
             logger.info(f"Student model parameters: {student_params:,}")
             logger.info(f"Student model inference time: {student_inference_time:.2f} ms")
@@ -313,6 +307,31 @@ try:
             logger.info(f"Inference time improvement: {time_improvement:.2f}%")
             logger.info(f"Memory usage reduction: {memory_reduction:.2f}%")
             
+            # Evaluate accuracy using simplified method
+            logger.info("Evaluating student model accuracy")
+            accuracy = 0.0
+            try:
+                teacher_model.eval()
+                student_model.eval()
+                
+                with torch.no_grad():
+                    teacher_outputs = teacher_model(**inputs)
+                    student_outputs = student_model(**inputs)
+                    
+                    # For classification tasks, compare predictions
+                    if hasattr(teacher_outputs, "logits") and hasattr(student_outputs, "logits"):
+                        teacher_preds = torch.argmax(teacher_outputs.logits, dim=-1)
+                        student_preds = torch.argmax(student_outputs.logits, dim=-1)
+                        
+                        # Calculate simple accuracy
+                        accuracy = (student_preds == teacher_preds).float().mean().item()
+                        logger.info(f"Simple evaluation accuracy: {accuracy:.4f}")
+                    else:
+                        logger.info("No logits found for evaluation, using default accuracy")
+            except Exception as e:
+                logger.error(f"Error evaluating accuracy: {e}")
+                logger.error(traceback.format_exc())
+            
             # Save metrics
             student_model_name = f"distilled-{model_name.split('/')[-1]}"
             metrics = {
@@ -323,7 +342,7 @@ try:
                         "inference_time": round(teacher_inference_time, 2),
                         "memory_usage": round(teacher_memory_usage, 2),
                         "parameters": teacher_params,
-                        "accuracy": 1.0
+                        "accuracy": 1.0  # Assume teacher has perfect accuracy
                     },
                     "student": {
                         "model_name": student_model_name,
@@ -331,7 +350,7 @@ try:
                         "inference_time": round(student_inference_time, 2),
                         "memory_usage": round(student_memory_usage, 2),
                         "parameters": student_params,
-                        "accuracy": accuracy
+                        "accuracy": round(accuracy, 4)
                     },
                     "improvements": {
                         "size_reduction": round(size_reduction, 2),
@@ -395,38 +414,3 @@ except Exception as e:
     logger.error(f"Error in knowledge distillation: {e}")
     logger.error(traceback.format_exc())
     sys.exit(1)
-
-# Define the train_student_model function directly in the script
-def train_student_model(teacher_model, student_model, tokenizer, task, device, args, logger):
-    """Train the student model using knowledge distillation from the teacher model."""
-    try:
-        logger.info("Setting up simplified evaluation")
-        
-        # Prepare sample inputs for evaluation
-        inputs = prepare_sample_inputs(model_name, task, tokenizer, device)
-        
-        # Run a simple evaluation on the sample inputs
-        teacher_model.eval()
-        student_model.eval()
-        
-        with torch.no_grad():
-            teacher_outputs = teacher_model(**inputs)
-            student_outputs = student_model(**inputs)
-            
-            # For classification tasks, compare predictions
-            if hasattr(teacher_outputs, "logits") and hasattr(student_outputs, "logits"):
-                teacher_preds = torch.argmax(teacher_outputs.logits, dim=-1)
-                student_preds = torch.argmax(student_outputs.logits, dim=-1)
-                
-                # Calculate simple accuracy
-                accuracy = (student_preds == teacher_preds).float().mean().item()
-                logger.info(f"Simple evaluation accuracy: {accuracy:.4f}")
-                return accuracy
-            else:
-                logger.info("No logits found for evaluation, returning 0")
-                return 0
-                
-    except Exception as e:
-        logger.error(f"Error in simplified evaluation: {e}")
-        logger.error(traceback.format_exc())
-        return 0
