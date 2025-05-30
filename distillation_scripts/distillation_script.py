@@ -253,15 +253,26 @@ try:
             student_model_name = f"distilled-{model_name.split('/')[-1]}"
             metrics = {
                 model_key: {
-                    "model_name": model_name,
-                    "student_model_name": student_model_name,
-                    "task": task,
-                    "model_size": round(student_size, 2),
-                    "inference_time": round(student_inference_time, 2),
-                    "memory_usage": round(student_memory_usage, 2),
-                    "size_reduction": round(size_reduction, 2),
-                    "time_improvement": round(time_improvement, 2),
-                    "memory_reduction": round(memory_reduction, 2)
+                    "teacher": {
+                        "model_name": model_name,
+                        "model_size": round(teacher_size, 2),
+                        "inference_time": round(teacher_inference_time, 2),
+                        "memory_usage": round(teacher_memory_usage, 2),
+                        "parameters": teacher_params
+                    },
+                    "student": {
+                        "model_name": student_model_name,
+                        "model_size": round(student_size, 2),
+                        "inference_time": round(student_inference_time, 2),
+                        "memory_usage": round(student_memory_usage, 2),
+                        "parameters": student_params
+                    },
+                    "improvements": {
+                        "size_reduction": round(size_reduction, 2),
+                        "time_improvement": round(time_improvement, 2),
+                        "memory_reduction": round(memory_reduction, 2),
+                        "params_reduction": round(params_reduction, 2)
+                    }
                 }
             }
             
