@@ -22,12 +22,8 @@ from transformers import DistilBertForSequenceClassification, DistilBertForToken
 from transformers import DistilBertForQuestionAnswering, DistilBertForMaskedLM
 from transformers import Trainer, TrainingArguments
 from datasets import load_dataset
-from transformers import DistilBertForSequenceClassification, DistilBertForTokenClassification
-from transformers import DistilBertForQuestionAnswering, DistilBertForMaskedLM
-from transformers import Trainer, TrainingArguments
-from datasets import load_dataset
 
-# Configure logging
+# Configure logging with more detailed format
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -37,124 +33,172 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Add a file handler to save logs to a file
+try:
+    log_file = os.path.join('/tmp', 'distillation.log')
+    file_handler = logging.FileHandler(log_file)
+    file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    logger.addHandler(file_handler)
+    logger.info(f"Logging to file: {log_file}")
+except Exception as e:
+    logger.warning(f"Could not set up file logging: {e}")
+
 def get_model_size(model):
     """Calculate model size in MB."""
-    param_size = 0
-    for param in model.parameters():
-        param_size += param.nelement() * param.element_size()
-    buffer_size = 0
-    for buffer in model.buffers():
-        buffer_size += buffer.nelement() * buffer.element_size()
-    
-    size_mb = (param_size + buffer_size) / 1024**2
-    return size_mb
+    try:
+        param_size = 0
+        for param in model.parameters():
+            param_size += param.nelement() * param.element_size()
+        buffer_size = 0
+        for buffer in model.buffers():
+            buffer_size += buffer.nelement() * buffer.element_size()
+        
+        size_mb = (param_size + buffer_size) / 1024**2
+        return size_mb
+    except Exception as e:
+        logger.error(f"Error calculating model size: {e}")
+        logger.error(traceback.format_exc())
+        return 0
 
 def get_num_parameters(model):
     """Calculate number of parameters in the model."""
-    return sum(p.numel() for p in model.parameters())
+    try:
+        return sum(p.numel() for p in model.parameters())
+    except Exception as e:
+        logger.error(f"Error calculating number of parameters: {e}")
+        logger.error(traceback.format_exc())
+        return 0
 
 def measure_inference_time(model, inputs, num_runs=10):
     """Measure average inference time over multiple runs."""
-    # Warm-up run
-    with torch.no_grad():
-        model(**inputs)
-    
-    # Measure inference time
-    start_event = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() else None
-    end_event = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() else None
-    
-    inference_times = []
-    for _ in range(num_runs):
-        if torch.cuda.is_available():
-            start_event.record()
-            with torch.no_grad():
-                model(**inputs)
-            end_event.record()
-            torch.cuda.synchronize()
-            inference_times.append(start_event.elapsed_time(end_event))
-        else:
+    try:
+        model.eval()
+        with torch.no_grad():
+            # Warmup
+            for _ in range(3):
+                _ = model(**inputs)
+            
+            # Measure time
             start_time = time.time()
-            with torch.no_grad():
-                model(**inputs)
+            for _ in range(num_runs):
+                _ = model(**inputs)
             end_time = time.time()
-            inference_times.append((end_time - start_time) * 1000)  # Convert to ms
-    
-    return sum(inference_times) / len(inference_times)
+            
+            avg_time_ms = (end_time - start_time) * 1000 / num_runs
+            return avg_time_ms
+    except Exception as e:
+        logger.error(f"Error measuring inference time: {e}")
+        logger.error(traceback.format_exc())
+        return 0
 
 def measure_memory_usage(model, inputs):
     """Measure peak memory usage during inference."""
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats()
-        torch.cuda.empty_cache()
-        
-        with torch.no_grad():
-            model(**inputs)
-        
-        memory_usage = torch.cuda.max_memory_allocated() / 1024**2  # Convert to MB
-    else:
-        # For CPU, use a rough estimate based on model size
-        memory_usage = get_model_size(model) * 2  # Rough estimate
-    
-    return memory_usage
+    try:
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats()
+            torch.cuda.empty_cache()
+            
+            model.eval()
+            with torch.no_grad():
+                _ = model(**inputs)
+            
+            peak_memory_mb = torch.cuda.max_memory_allocated() / 1024**2
+            return peak_memory_mb
+        else:
+            # For CPU, return an estimate based on model size
+            return get_model_size(model) * 2  # Rough estimate
+    except Exception as e:
+        logger.error(f"Error measuring memory usage: {e}")
+        logger.error(traceback.format_exc())
+        return 0
 
 def prepare_sample_inputs(model_name, task, tokenizer, device):
     """Prepare sample inputs for the model based on its task."""
-    if task == "sequence-classification" or task == "text-classification":
-        text = "I really enjoyed this movie. The acting was superb and the plot was engaging."
-        inputs = tokenizer(text, return_tensors="pt")
-    elif task == "token-classification":
-        text = "Jeff Bezos founded Amazon in 1994 and the company is headquartered in Seattle, Washington."
-        inputs = tokenizer(text, return_tensors="pt")
-    elif task == "question-answering":
-        question = "What is machine learning?"
-        context = "Machine learning is a branch of artificial intelligence that focuses on building systems that learn from data."
-        inputs = tokenizer(question, context, return_tensors="pt")
-    elif task == "masked-lm" or task == "fill-mask":
-        text = "The [MASK] is a large language model trained by OpenAI."
-        inputs = tokenizer(text, return_tensors="pt")
-    else:
-        raise ValueError(f"Unsupported task: {task}")
-    
-    # Move inputs to the appropriate device
-    return {k: v.to(device) for k, v in inputs.items()}
+    try:
+        logger.info(f"Preparing sample inputs for task: {task}")
+        if task == "sequence-classification" or task == "text-classification":
+            text = "I really enjoyed this movie. The acting was superb and the plot was engaging."
+            inputs = tokenizer(text, return_tensors="pt")
+        elif task == "token-classification":
+            text = "Jeff Bezos founded Amazon in 1994 and the company is headquartered in Seattle, Washington."
+            inputs = tokenizer(text, return_tensors="pt")
+        elif task == "question-answering":
+            question = "What is machine learning?"
+            context = "Machine learning is a branch of artificial intelligence that focuses on building systems that learn from data."
+            inputs = tokenizer(question, context, return_tensors="pt")
+        elif task == "masked-lm" or task == "fill-mask":
+            text = "The [MASK] is a large language model trained by OpenAI."
+            inputs = tokenizer(text, return_tensors="pt")
+        else:
+            raise ValueError(f"Unsupported task: {task}")
+        
+        # Move inputs to the appropriate device
+        return {k: v.to(device) for k, v in inputs.items()}
+    except Exception as e:
+        logger.error(f"Error preparing sample inputs: {e}")
+        logger.error(traceback.format_exc())
+        raise
 
 def create_student_model(task, teacher_model):
     """Create a smaller student model based on the teacher model's task."""
-    # Create a DistilBERT configuration with fewer layers
-    config = DistilBertConfig(
-        hidden_size=teacher_model.config.hidden_size,
-        num_hidden_layers=4,  # Fewer layers than BERT/RoBERTa
-        num_attention_heads=teacher_model.config.num_attention_heads,
-        intermediate_size=teacher_model.config.intermediate_size,
-        hidden_act=teacher_model.config.hidden_act,
-        hidden_dropout_prob=teacher_model.config.hidden_dropout_prob,
-        attention_probs_dropout_prob=teacher_model.config.attention_probs_dropout_prob,
-        max_position_embeddings=teacher_model.config.max_position_embeddings,
-        initializer_range=teacher_model.config.initializer_range,
-        layer_norm_eps=teacher_model.config.layer_norm_eps,
-        pad_token_id=teacher_model.config.pad_token_id,
-        vocab_size=teacher_model.config.vocab_size
-    )
-    
-    # Handle type_vocab_size for different model architectures
-    if hasattr(teacher_model.config, 'type_vocab_size'):
-        config.type_vocab_size = teacher_model.config.type_vocab_size
-    
-    # Create the appropriate model based on the task
-    if task == "sequence-classification" or task == "text-classification":
-        config.num_labels = teacher_model.config.num_labels
-        student_model = DistilBertForSequenceClassification(config)
-    elif task == "token-classification":
-        config.num_labels = teacher_model.config.num_labels
-        student_model = DistilBertForTokenClassification(config)
-    elif task == "question-answering":
-        student_model = DistilBertForQuestionAnswering(config)
-    elif task == "masked-lm" or task == "fill-mask":
-        student_model = DistilBertForMaskedLM(config)
-    else:
-        raise ValueError(f"Unsupported task: {task}")
-    
-    return student_model
+    try:
+        logger.info("Creating student model configuration")
+        # Log teacher model configuration for debugging
+        teacher_config = teacher_model.config
+        logger.info(f"Teacher model config attributes: {dir(teacher_config)}")
+        
+        # Create a DistilBERT configuration with fewer layers
+        config = DistilBertConfig(
+            hidden_size=getattr(teacher_config, 'hidden_size', 768),
+            num_hidden_layers=4,  # Fewer layers than BERT/RoBERTa
+            num_attention_heads=getattr(teacher_config, 'num_attention_heads', 12),
+            intermediate_size=getattr(teacher_config, 'intermediate_size', 
+                                     getattr(teacher_config, 'hidden_size', 768) * 4),  # Default to hidden_size * 4
+            hidden_act=getattr(teacher_config, 'hidden_act', 'gelu'),
+            hidden_dropout_prob=getattr(teacher_config, 'hidden_dropout_prob', 0.1),
+            attention_probs_dropout_prob=getattr(teacher_config, 'attention_probs_dropout_prob', 0.1),
+            max_position_embeddings=getattr(teacher_config, 'max_position_embeddings', 512),
+            initializer_range=getattr(teacher_config, 'initializer_range', 0.02),
+            layer_norm_eps=getattr(teacher_config, 'layer_norm_eps', 1e-12),
+            pad_token_id=getattr(teacher_config, 'pad_token_id', 0),
+            vocab_size=getattr(teacher_config, 'vocab_size', 30522)
+        )
+        
+        # Handle type_vocab_size for different model architectures
+        if hasattr(teacher_config, 'type_vocab_size'):
+            config.type_vocab_size = teacher_config.type_vocab_size
+        else:
+            config.type_vocab_size = 2  # Default value
+            logger.info("Using default type_vocab_size=2 as it's not present in teacher config")
+        
+        logger.info(f"Created student config with: hidden_size={config.hidden_size}, "
+                   f"num_hidden_layers={config.num_hidden_layers}, "
+                   f"num_attention_heads={config.num_attention_heads}, "
+                   f"intermediate_size={config.intermediate_size}")
+        
+        # Create the appropriate model based on the task
+        logger.info(f"Creating student model for task: {task}")
+        if task == "sequence-classification" or task == "text-classification":
+            config.num_labels = getattr(teacher_config, 'num_labels', 2)
+            logger.info(f"Setting num_labels={config.num_labels} for classification")
+            student_model = DistilBertForSequenceClassification(config)
+        elif task == "token-classification":
+            config.num_labels = getattr(teacher_config, 'num_labels', 9)
+            logger.info(f"Setting num_labels={config.num_labels} for token classification")
+            student_model = DistilBertForTokenClassification(config)
+        elif task == "question-answering":
+            student_model = DistilBertForQuestionAnswering(config)
+        elif task == "masked-lm" or task == "fill-mask":
+            student_model = DistilBertForMaskedLM(config)
+        else:
+            raise ValueError(f"Unsupported task: {task}")
+        
+        logger.info(f"Successfully created student model with {get_num_parameters(student_model):,} parameters")
+        return student_model
+    except Exception as e:
+        logger.error(f"Error creating student model: {e}")
+        logger.error(traceback.format_exc())
+        raise
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Knowledge distillation script")
@@ -168,18 +212,24 @@ parser.add_argument("--alpha", type=float, default=0.5, help="Weight for distill
 args = parser.parse_args()
 
 try:
+    # Log script start with arguments
+    logger.info(f"Starting knowledge distillation with args: {args}")
+    
     # Load teacher model info
     logger.info(f"Loading teacher model info from {args.teacher_info_path}")
     with open(args.teacher_info_path, "r") as f:
         model_info = json.load(f)
+    logger.info(f"Loaded model info: {model_info}")
     
     # Load student architecture info
     logger.info(f"Loading student architecture info from {args.student_info_path}")
     with open(args.student_info_path, "r") as f:
         student_architectures = json.load(f)
+    logger.info(f"Loaded student architectures: {student_architectures}")
     
     # Create output directory if it doesn't exist
     os.makedirs(args.output_dir, exist_ok=True)
+    logger.info(f"Created output directory: {args.output_dir}")
     
     # Process each model
     all_metrics = {}
@@ -189,6 +239,8 @@ try:
             
             model_name = info["model_name"]
             task = info["task"]
+            
+            logger.info(f"Model name: {model_name}, Task: {task}")
             
             # Set device
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -221,6 +273,7 @@ try:
             inputs = prepare_sample_inputs(model_name, task, tokenizer, device)
             
             # Measure teacher model metrics
+            logger.info("Measuring teacher model metrics")
             teacher_size = get_model_size(teacher_model)
             teacher_params = get_num_parameters(teacher_model)
             teacher_inference_time = measure_inference_time(teacher_model, inputs)
@@ -232,6 +285,7 @@ try:
             logger.info(f"Teacher model memory usage: {teacher_memory_usage:.2f} MB")
             
             # Measure student model metrics
+            logger.info("Measuring student model metrics")
             student_size = get_model_size(student_model)
             student_params = get_num_parameters(student_model)
             student_inference_time = measure_inference_time(student_model, inputs)
@@ -318,6 +372,16 @@ try:
             logger.info(f"File content preview: {content[:200]}...")
     else:
         logger.error(f"Failed to create metrics file at {metrics_path}")
+
+    # Copy log file to output directory for easier access
+    try:
+        if os.path.exists(log_file):
+            output_log_file = os.path.join(args.output_dir, "distillation.log")
+            with open(log_file, 'r') as src, open(output_log_file, 'w') as dst:
+                dst.write(src.read())
+            logger.info(f"Copied log file to {output_log_file}")
+    except Exception as e:
+        logger.error(f"Error copying log file: {e}")
 
 except Exception as e:
     logger.error(f"Error in knowledge distillation: {e}")
