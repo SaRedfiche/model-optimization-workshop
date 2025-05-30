@@ -311,8 +311,9 @@ try:
             logger.info("Evaluating student model accuracy")
             accuracy = 0.0
             try:
-                # Create a small evaluation dataset
+                # Task-specific evaluation and knowledge transfer
                 if task == "sequence-classification" or task == "text-classification":
+                    # Text classification evaluation examples
                     eval_texts = [
                         "I really enjoyed this movie. The acting was superb.",
                         "This film was terrible. I hated every minute of it.",
@@ -347,8 +348,8 @@ try:
                     accuracy = matches / len(eval_texts) if len(eval_texts) > 0 else 0
                     logger.info(f"Evaluated on {len(eval_texts)} examples, accuracy: {accuracy:.4f}")
                     
-                    # Simple knowledge transfer to improve accuracy
-                    logger.info("Performing simple knowledge transfer")
+                    # Knowledge transfer for text classification
+                    logger.info("Performing knowledge transfer for text classification")
                     try:
                         # Copy embedding weights from teacher to student
                         if hasattr(teacher_model, "distilbert") and hasattr(student_model, "distilbert"):
@@ -387,10 +388,310 @@ try:
                         accuracy = matches / len(eval_texts) if len(eval_texts) > 0 else 0
                         logger.info(f"Accuracy after knowledge transfer: {accuracy:.4f}")
                     except Exception as e:
-                        logger.error(f"Error during knowledge transfer: {e}")
+                        logger.error(f"Error during knowledge transfer for text classification: {e}")
                         logger.error(traceback.format_exc())
+                
+                elif task == "token-classification":
+                    # NER evaluation examples
+                    eval_texts = [
+                        "Jeff Bezos founded Amazon in Seattle, Washington.",
+                        "Microsoft was established by Bill Gates in 1975.",
+                        "The Golden Gate Bridge is located in San Francisco.",
+                        "Elon Musk is the CEO of Tesla and SpaceX.",
+                        "The Eiffel Tower was built in Paris, France."
+                    ]
+                    
+                    logger.info(f"Evaluating on {len(eval_texts)} examples for token classification")
+                    
+                    # Process all examples
+                    teacher_preds_all = []
+                    student_preds_all = []
+                    
+                    for text in eval_texts:
+                        # Tokenize for NER (split into words)
+                        words = text.split()
+                        eval_inputs = tokenizer(words, is_split_into_words=True, return_tensors="pt", padding=True, truncation=True)
+                        eval_inputs = {k: v.to(device) for k, v in eval_inputs.items()}
+                        
+                        with torch.no_grad():
+                            teacher_outputs = teacher_model(**eval_inputs)
+                            student_outputs = student_model(**eval_inputs)
+                            
+                            # Get predictions for each token
+                            teacher_preds = torch.argmax(teacher_outputs.logits, dim=-1)
+                            student_preds = torch.argmax(student_outputs.logits, dim=-1)
+                            
+                            # Compare predictions for non-special tokens
+                            for i in range(teacher_preds.shape[1]):
+                                if i < len(words):  # Only consider actual words
+                                    teacher_preds_all.append(teacher_preds[0, i].item())
+                                    student_preds_all.append(student_preds[0, i].item())
+                    
+                    # Calculate token-level accuracy
+                    if teacher_preds_all and student_preds_all:
+                        matches = sum(t == s for t, s in zip(teacher_preds_all, student_preds_all))
+                        accuracy = matches / len(teacher_preds_all)
+                        logger.info(f"Token classification accuracy: {accuracy:.4f}")
+                    
+                    # Knowledge transfer for token classification
+                    logger.info("Performing knowledge transfer for token classification")
+                    try:
+                        # Copy embedding weights
+                        if hasattr(teacher_model, "distilbert") and hasattr(student_model, "distilbert"):
+                            student_model.distilbert.embeddings.word_embeddings.weight.data = \
+                                teacher_model.distilbert.embeddings.word_embeddings.weight.data.clone()
+                            logger.info("Copied embedding weights from teacher to student")
+                        
+                        # Copy classifier weights if dimensions match
+                        if hasattr(teacher_model, "classifier") and hasattr(student_model, "classifier"):
+                            if teacher_model.classifier.out_features == student_model.classifier.out_features:
+                                student_model.classifier.weight.data = teacher_model.classifier.weight.data.clone()
+                                student_model.classifier.bias.data = teacher_model.classifier.bias.data.clone()
+                                logger.info("Copied classifier weights from teacher to student")
+                        
+                        # Re-evaluate after knowledge transfer
+                        teacher_preds_all = []
+                        student_preds_all = []
+                        
+                        logger.info("Re-evaluating token classification after knowledge transfer")
+                        for text in eval_texts:
+                            words = text.split()
+                            eval_inputs = tokenizer(words, is_split_into_words=True, return_tensors="pt", padding=True, truncation=True)
+                            eval_inputs = {k: v.to(device) for k, v in eval_inputs.items()}
+                            
+                            with torch.no_grad():
+                                teacher_outputs = teacher_model(**eval_inputs)
+                                student_outputs = student_model(**eval_inputs)
+                                
+                                teacher_preds = torch.argmax(teacher_outputs.logits, dim=-1)
+                                student_preds = torch.argmax(student_outputs.logits, dim=-1)
+                                
+                                for i in range(teacher_preds.shape[1]):
+                                    if i < len(words):
+                                        teacher_preds_all.append(teacher_preds[0, i].item())
+                                        student_preds_all.append(student_preds[0, i].item())
+                        
+                        # Calculate accuracy after knowledge transfer
+                        if teacher_preds_all and student_preds_all:
+                            matches = sum(t == s for t, s in zip(teacher_preds_all, student_preds_all))
+                            accuracy = matches / len(teacher_preds_all)
+                            logger.info(f"Token classification accuracy after knowledge transfer: {accuracy:.4f}")
+                    except Exception as e:
+                        logger.error(f"Error during knowledge transfer for token classification: {e}")
+                        logger.error(traceback.format_exc())
+                
+                elif task == "question-answering":
+                    # QA evaluation examples
+                    eval_questions = [
+                        "What is machine learning?",
+                        "Who founded Amazon?",
+                        "When was the Eiffel Tower built?",
+                        "What is the capital of France?",
+                        "How does a neural network work?"
+                    ]
+                    eval_contexts = [
+                        "Machine learning is a branch of artificial intelligence that focuses on building systems that learn from data.",
+                        "Amazon was founded by Jeff Bezos in 1994 as an online bookstore.",
+                        "The Eiffel Tower was constructed from 1887 to 1889 as the entrance to the 1889 World's Fair.",
+                        "Paris is the capital and most populous city of France, with an estimated population of 2,175,601 residents.",
+                        "Neural networks are computing systems vaguely inspired by the biological neural networks that constitute animal brains."
+                    ]
+                    
+                    logger.info(f"Evaluating on {len(eval_questions)} examples for question answering")
+                    
+                    # Process all examples
+                    teacher_start_preds_all = []
+                    teacher_end_preds_all = []
+                    student_start_preds_all = []
+                    student_end_preds_all = []
+                    
+                    for question, context in zip(eval_questions, eval_contexts):
+                        eval_inputs = tokenizer(question, context, return_tensors="pt", padding=True, truncation=True)
+                        eval_inputs = {k: v.to(device) for k, v in eval_inputs.items()}
+                        
+                        with torch.no_grad():
+                            teacher_outputs = teacher_model(**eval_inputs)
+                            student_outputs = student_model(**eval_inputs)
+                            
+                            # Get start and end positions
+                            teacher_start = torch.argmax(teacher_outputs.start_logits, dim=-1)
+                            teacher_end = torch.argmax(teacher_outputs.end_logits, dim=-1)
+                            student_start = torch.argmax(student_outputs.start_logits, dim=-1)
+                            student_end = torch.argmax(student_outputs.end_logits, dim=-1)
+                            
+                            teacher_start_preds_all.append(teacher_start.item())
+                            teacher_end_preds_all.append(teacher_end.item())
+                            student_start_preds_all.append(student_start.item())
+                            student_end_preds_all.append(student_end.item())
+                            
+                            logger.info(f"Question: '{question}', Teacher span: [{teacher_start.item()}, {teacher_end.item()}], Student span: [{student_start.item()}, {student_end.item()}]")
+                    
+                    # Calculate span accuracy (both start and end must match)
+                    start_matches = sum(t == s for t, s in zip(teacher_start_preds_all, student_start_preds_all))
+                    end_matches = sum(t == s for t, s in zip(teacher_end_preds_all, student_end_preds_all))
+                    exact_matches = sum((ts == ss) and (te == se) for ts, te, ss, se in 
+                                       zip(teacher_start_preds_all, teacher_end_preds_all, 
+                                           student_start_preds_all, student_end_preds_all))
+                    
+                    start_accuracy = start_matches / len(eval_questions)
+                    end_accuracy = end_matches / len(eval_questions)
+                    exact_accuracy = exact_matches / len(eval_questions)
+                    
+                    # Use exact match as the overall accuracy
+                    accuracy = exact_accuracy
+                    logger.info(f"QA start position accuracy: {start_accuracy:.4f}")
+                    logger.info(f"QA end position accuracy: {end_accuracy:.4f}")
+                    logger.info(f"QA exact match accuracy: {exact_accuracy:.4f}")
+                    
+                    # Knowledge transfer for QA
+                    logger.info("Performing knowledge transfer for question answering")
+                    try:
+                        # Copy embedding weights
+                        if hasattr(teacher_model, "distilbert") and hasattr(student_model, "distilbert"):
+                            student_model.distilbert.embeddings.word_embeddings.weight.data = \
+                                teacher_model.distilbert.embeddings.word_embeddings.weight.data.clone()
+                            logger.info("Copied embedding weights from teacher to student")
+                        
+                        # Copy QA output weights if possible
+                        if hasattr(teacher_model, "qa_outputs") and hasattr(student_model, "qa_outputs"):
+                            student_model.qa_outputs.weight.data = teacher_model.qa_outputs.weight.data.clone()
+                            student_model.qa_outputs.bias.data = teacher_model.qa_outputs.bias.data.clone()
+                            logger.info("Copied QA output weights from teacher to student")
+                        
+                        # Re-evaluate after knowledge transfer
+                        teacher_start_preds_all = []
+                        teacher_end_preds_all = []
+                        student_start_preds_all = []
+                        student_end_preds_all = []
+                        
+                        logger.info("Re-evaluating QA after knowledge transfer")
+                        for question, context in zip(eval_questions, eval_contexts):
+                            eval_inputs = tokenizer(question, context, return_tensors="pt", padding=True, truncation=True)
+                            eval_inputs = {k: v.to(device) for k, v in eval_inputs.items()}
+                            
+                            with torch.no_grad():
+                                teacher_outputs = teacher_model(**eval_inputs)
+                                student_outputs = student_model(**eval_inputs)
+                                
+                                teacher_start = torch.argmax(teacher_outputs.start_logits, dim=-1)
+                                teacher_end = torch.argmax(teacher_outputs.end_logits, dim=-1)
+                                student_start = torch.argmax(student_outputs.start_logits, dim=-1)
+                                student_end = torch.argmax(student_outputs.end_logits, dim=-1)
+                                
+                                teacher_start_preds_all.append(teacher_start.item())
+                                teacher_end_preds_all.append(teacher_end.item())
+                                student_start_preds_all.append(student_start.item())
+                                student_end_preds_all.append(student_end.item())
+                        
+                        # Calculate accuracy after knowledge transfer
+                        exact_matches = sum((ts == ss) and (te == se) for ts, te, ss, se in 
+                                           zip(teacher_start_preds_all, teacher_end_preds_all, 
+                                               student_start_preds_all, student_end_preds_all))
+                        accuracy = exact_matches / len(eval_questions)
+                        logger.info(f"QA exact match accuracy after knowledge transfer: {accuracy:.4f}")
+                    except Exception as e:
+                        logger.error(f"Error during knowledge transfer for QA: {e}")
+                        logger.error(traceback.format_exc())
+                
+                elif task == "masked-lm" or task == "fill-mask":
+                    # MLM evaluation examples
+                    eval_texts = [
+                        "The [MASK] is a large language model.",
+                        "I enjoy reading [MASK] in my free time.",
+                        "The capital of France is [MASK].",
+                        "Machine learning is a branch of [MASK] intelligence.",
+                        "The [MASK] is the largest planet in our solar system."
+                    ]
+                    
+                    logger.info(f"Evaluating on {len(eval_texts)} examples for masked language modeling")
+                    
+                    # Process all examples
+                    teacher_preds_all = []
+                    student_preds_all = []
+                    
+                    for text in eval_texts:
+                        eval_inputs = tokenizer(text, return_tensors="pt")
+                        eval_inputs = {k: v.to(device) for k, v in eval_inputs.items()}
+                        
+                        # Find the masked token position
+                        mask_token_index = torch.where(eval_inputs["input_ids"] == tokenizer.mask_token_id)[1]
+                        
+                        with torch.no_grad():
+                            teacher_outputs = teacher_model(**eval_inputs)
+                            student_outputs = student_model(**eval_inputs)
+                            
+                            # Get predictions for the masked token
+                            teacher_pred = torch.argmax(teacher_outputs.logits[0, mask_token_index]).item()
+                            student_pred = torch.argmax(student_outputs.logits[0, mask_token_index]).item()
+                            
+                            teacher_preds_all.append(teacher_pred)
+                            student_preds_all.append(student_pred)
+                            
+                            # Decode predictions for logging
+                            teacher_word = tokenizer.decode([teacher_pred])
+                            student_word = tokenizer.decode([student_pred])
+                            logger.info(f"Masked text: '{text}', Teacher prediction: '{teacher_word}', Student prediction: '{student_word}'")
+                    
+                    # Calculate accuracy
+                    matches = sum(t == s for t, s in zip(teacher_preds_all, student_preds_all))
+                    accuracy = matches / len(eval_texts)
+                    logger.info(f"MLM accuracy: {accuracy:.4f}")
+                    
+                    # Knowledge transfer for MLM
+                    logger.info("Performing knowledge transfer for masked language modeling")
+                    try:
+                        # Copy embedding weights
+                        if hasattr(teacher_model, "distilbert") and hasattr(student_model, "distilbert"):
+                            student_model.distilbert.embeddings.word_embeddings.weight.data = \
+                                teacher_model.distilbert.embeddings.word_embeddings.weight.data.clone()
+                            logger.info("Copied embedding weights from teacher to student")
+                        
+                        # Copy prediction head weights if possible
+                        if hasattr(teacher_model, "vocab_projector") and hasattr(student_model, "vocab_projector"):
+                            student_model.vocab_projector.weight.data = teacher_model.vocab_projector.weight.data.clone()
+                            student_model.vocab_projector.bias.data = teacher_model.vocab_projector.bias.data.clone()
+                            logger.info("Copied vocab projector weights from teacher to student")
+                        elif hasattr(teacher_model, "cls") and hasattr(student_model, "cls"):
+                            if hasattr(teacher_model.cls, "predictions") and hasattr(student_model.cls, "predictions"):
+                                if hasattr(teacher_model.cls.predictions, "decoder") and hasattr(student_model.cls.predictions, "decoder"):
+                                    student_model.cls.predictions.decoder.weight.data = teacher_model.cls.predictions.decoder.weight.data.clone()
+                                    if hasattr(teacher_model.cls.predictions.decoder, "bias") and hasattr(student_model.cls.predictions.decoder, "bias"):
+                                        student_model.cls.predictions.decoder.bias.data = teacher_model.cls.predictions.decoder.bias.data.clone()
+                                    logger.info("Copied MLM decoder weights from teacher to student")
+                        
+                        # Re-evaluate after knowledge transfer
+                        teacher_preds_all = []
+                        student_preds_all = []
+                        
+                        logger.info("Re-evaluating MLM after knowledge transfer")
+                        for text in eval_texts:
+                            eval_inputs = tokenizer(text, return_tensors="pt")
+                            eval_inputs = {k: v.to(device) for k, v in eval_inputs.items()}
+                            
+                            # Find the masked token position
+                            mask_token_index = torch.where(eval_inputs["input_ids"] == tokenizer.mask_token_id)[1]
+                            
+                            with torch.no_grad():
+                                teacher_outputs = teacher_model(**eval_inputs)
+                                student_outputs = student_model(**eval_inputs)
+                                
+                                teacher_pred = torch.argmax(teacher_outputs.logits[0, mask_token_index]).item()
+                                student_pred = torch.argmax(student_outputs.logits[0, mask_token_index]).item()
+                                
+                                teacher_preds_all.append(teacher_pred)
+                                student_preds_all.append(student_pred)
+                        
+                        # Calculate accuracy after knowledge transfer
+                        matches = sum(t == s for t, s in zip(teacher_preds_all, student_preds_all))
+                        accuracy = matches / len(eval_texts)
+                        logger.info(f"MLM accuracy after knowledge transfer: {accuracy:.4f}")
+                    except Exception as e:
+                        logger.error(f"Error during knowledge transfer for MLM: {e}")
+                        logger.error(traceback.format_exc())
+                
                 else:
-                    # For other tasks, use the existing simple evaluation
+                    logger.warning(f"No specific evaluation implemented for task: {task}")
+                    # Fallback to simple evaluation
                     teacher_model.eval()
                     student_model.eval()
                     
