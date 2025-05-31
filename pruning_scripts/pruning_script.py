@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 Improved pruning script for model optimization workshop.
-This script applies pruning to transformer models and measures performance metrics,
-with proper model size reduction and optimization.
+This script applies pruning to transformer models with proper model size reduction.
+Metrics collection and analysis are handled in the notebook.
 """
 
 import os
@@ -13,12 +13,10 @@ import numpy as np
 import logging
 import traceback
 import sys
-import time
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import AutoModelForTokenClassification, AutoModelForQuestionAnswering
 from transformers import AutoModelForMaskedLM
 from torch.nn.utils import prune
-import torch.nn.functional as F
 
 # Import specialized pruning libraries
 try:
@@ -39,76 +37,6 @@ logging.basicConfig(
     ]
 )
 logger = logging.getLogger(__name__)
-
-def get_model_size(model):
-    """Calculate model size in MB."""
-    param_size = 0
-    for param in model.parameters():
-        param_size += param.nelement() * param.element_size()
-    buffer_size = 0
-    for buffer in model.buffers():
-        buffer_size += buffer.nelement() * buffer.element_size()
-    
-    size_mb = (param_size + buffer_size) / 1024**2
-    return size_mb
-
-def get_num_parameters(model):
-    """Calculate number of parameters in the model."""
-    return sum(p.numel() for p in model.parameters())
-
-def count_non_zero_params(model):
-    """Count non-zero parameters in the model."""
-    non_zero = 0
-    total = 0
-    for param in model.parameters():
-        if param.dim() > 1:  # Only count weights, not biases
-            non_zero += torch.count_nonzero(param).item()
-            total += param.numel()
-    return non_zero, total
-
-def measure_inference_time(model, inputs, num_runs=10):
-    """Measure average inference time over multiple runs."""
-    # Warm-up run
-    with torch.no_grad():
-        model(**inputs)
-    
-    # Measure inference time
-    start_event = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() else None
-    end_event = torch.cuda.Event(enable_timing=True) if torch.cuda.is_available() else None
-    
-    inference_times = []
-    for _ in range(num_runs):
-        if torch.cuda.is_available():
-            start_event.record()
-            with torch.no_grad():
-                model(**inputs)
-            end_event.record()
-            torch.cuda.synchronize()
-            inference_times.append(start_event.elapsed_time(end_event))
-        else:
-            start_time = time.time()
-            with torch.no_grad():
-                model(**inputs)
-            end_time = time.time()
-            inference_times.append((end_time - start_time) * 1000)  # Convert to ms
-    
-    return sum(inference_times) / len(inference_times)
-
-def measure_memory_usage(model, inputs):
-    """Measure peak memory usage during inference."""
-    if torch.cuda.is_available():
-        torch.cuda.reset_peak_memory_stats()
-        torch.cuda.empty_cache()
-        
-        with torch.no_grad():
-            model(**inputs)
-        
-        memory_usage = torch.cuda.max_memory_allocated() / 1024**2  # Convert to MB
-    else:
-        # For CPU, use a rough estimate based on model size
-        memory_usage = get_model_size(model) * 2  # Rough estimate
-    
-    return memory_usage
 
 def prepare_sample_inputs(model_name, task, tokenizer, device):
     """Prepare sample inputs for the model based on its task."""
@@ -135,9 +63,6 @@ def apply_structured_pruning(model, amount):
     """Apply structured pruning to remove entire neurons/filters."""
     logger.info("Applying structured pruning...")
     
-    # Store the original parameter count
-    original_params = get_num_parameters(model)
-    
     # Apply structured pruning to each Linear layer
     for name, module in model.named_modules():
         if isinstance(module, torch.nn.Linear):
@@ -159,10 +84,6 @@ def apply_structured_pruning(model, amount):
             # If bias exists, zero it out too
             if module.bias is not None:
                 module.bias.data[indices] = 0
-    
-    # Count parameters after pruning
-    pruned_params = get_num_parameters(model)
-    logger.info(f"Original parameters: {original_params}, After pruning: {pruned_params}")
     
     return model
 
@@ -250,7 +171,7 @@ def export_to_onnx(model, inputs, output_path):
         return output_path
 
 def prune_model(model_key, model_info, pruning_method, pruning_amount, output_dir):
-    """Apply pruning to a model and evaluate its performance."""
+    """Apply pruning to a model."""
     logger.info(f"Pruning model: {model_key} with method: {pruning_method}, amount: {pruning_amount}")
     
     model_name = model_info["model_name"]
@@ -283,19 +204,6 @@ def prune_model(model_key, model_info, pruning_method, pruning_amount, output_di
     # Prepare sample inputs
     inputs = prepare_sample_inputs(model_name, task, tokenizer, device)
     
-    # Measure baseline metrics before pruning
-    baseline_size = get_model_size(model)
-    baseline_params = get_num_parameters(model)
-    baseline_non_zero, baseline_total = count_non_zero_params(model)
-    baseline_inference_time = measure_inference_time(model, inputs)
-    baseline_memory_usage = measure_memory_usage(model, inputs)
-    
-    logger.info(f"Baseline model size: {baseline_size:.2f} MB")
-    logger.info(f"Baseline parameters: {baseline_params}")
-    logger.info(f"Baseline non-zero weights: {baseline_non_zero}/{baseline_total} ({baseline_non_zero/baseline_total*100:.2f}%)")
-    logger.info(f"Baseline inference time: {baseline_inference_time:.2f} ms")
-    logger.info(f"Baseline memory usage: {baseline_memory_usage:.2f} MB")
-    
     # Apply pruning based on method
     if pruning_method == "l1_unstructured":
         # Apply unstructured pruning (sets weights to zero but doesn't reduce model size)
@@ -313,32 +221,6 @@ def prune_model(model_key, model_info, pruning_method, pruning_amount, output_di
     else:
         raise ValueError(f"Unsupported pruning method: {pruning_method}")
     
-    # Measure metrics after pruning
-    pruned_size = get_model_size(model)
-    pruned_params = get_num_parameters(model)
-    pruned_non_zero, pruned_total = count_non_zero_params(model)
-    pruned_inference_time = measure_inference_time(model, inputs)
-    pruned_memory_usage = measure_memory_usage(model, inputs)
-    
-    logger.info(f"Pruned model size: {pruned_size:.2f} MB")
-    logger.info(f"Pruned parameters: {pruned_params}")
-    logger.info(f"Pruned non-zero weights: {pruned_non_zero}/{pruned_total} ({pruned_non_zero/pruned_total*100:.2f}%)")
-    logger.info(f"Pruned inference time: {pruned_inference_time:.2f} ms")
-    logger.info(f"Pruned memory usage: {pruned_memory_usage:.2f} MB")
-    
-    # Calculate improvements
-    size_reduction = (baseline_size - pruned_size) / baseline_size * 100
-    param_reduction = (baseline_params - pruned_params) / baseline_params * 100
-    sparsity = (1 - pruned_non_zero / pruned_total) * 100
-    time_improvement = (baseline_inference_time - pruned_inference_time) / baseline_inference_time * 100
-    memory_reduction = (baseline_memory_usage - pruned_memory_usage) / baseline_memory_usage * 100
-    
-    logger.info(f"Size reduction: {size_reduction:.2f}%")
-    logger.info(f"Parameter reduction: {param_reduction:.2f}%")
-    logger.info(f"Model sparsity: {sparsity:.2f}%")
-    logger.info(f"Inference time improvement: {time_improvement:.2f}%")
-    logger.info(f"Memory usage reduction: {memory_reduction:.2f}%")
-    
     # Export to ONNX for further optimization
     onnx_path = os.path.join(output_dir, f"{model_key}_pruned.onnx")
     try:
@@ -348,32 +230,12 @@ def prune_model(model_key, model_info, pruning_method, pruning_amount, output_di
         logger.error(f"Error exporting to ONNX: {e}")
         logger.error(traceback.format_exc())
     
-    # Save metrics
-    metrics = {
-        model_key: {
-            "model_name": model_name,
-            "task": task,
-            "pruning_method": pruning_method,
-            "pruning_amount": pruning_amount,
-            "model_size": round(pruned_size, 2),
-            "inference_time": round(pruned_inference_time, 2),
-            "memory_usage": round(pruned_memory_usage, 2),
-            "size_reduction": round(size_reduction, 2),
-            "time_improvement": round(time_improvement, 2),
-            "memory_reduction": round(memory_reduction, 2),
-            "parameter_reduction": round(param_reduction, 2),
-            "sparsity": round(sparsity, 2),
-            "non_zero_weights": pruned_non_zero,
-            "total_weights": pruned_total
-        }
-    }
-    
-    return metrics, model
+    return model
 
 # Parse command-line arguments
 parser = argparse.ArgumentParser(description="Improved pruning script")
 parser.add_argument("--model-info-path", type=str, required=True, help="Path to model info JSON file")
-parser.add_argument("--output-dir", type=str, required=True, help="Output directory for metrics and models")
+parser.add_argument("--output-dir", type=str, required=True, help="Output directory for pruned models")
 parser.add_argument("--pruning-method", type=str, default="structured", 
                     choices=["l1_unstructured", "structured", "advanced"],
                     help="Pruning method to use")
@@ -407,13 +269,11 @@ try:
     os.makedirs(args.output_dir, exist_ok=True)
     
     # Prune each model
-    all_metrics = {}
     for model_key, info in model_info.items():
         try:
-            metrics, pruned_model = prune_model(
+            pruned_model = prune_model(
                 model_key, info, args.pruning_method, args.pruning_amount, args.output_dir
             )
-            all_metrics.update(metrics)
             
             # Save pruned model
             model_dir = os.path.join(args.output_dir, f"{model_key}_pruned")
@@ -424,13 +284,6 @@ try:
         except Exception as e:
             logger.error(f"Error pruning model {model_key}: {e}")
             logger.error(traceback.format_exc())
-    
-    # Save all metrics to a single file
-    metrics_path = os.path.join(args.output_dir, "pruned-metrics.json")  # Using hyphen instead of underscore
-    with open(metrics_path, "w") as f:
-        json.dump(all_metrics, f, indent=2)
-    
-    logger.info(f"Saved pruned metrics to {metrics_path}")
 
 except Exception as e:
     logger.error(f"Error in pruning: {e}")
