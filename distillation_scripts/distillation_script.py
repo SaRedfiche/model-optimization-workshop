@@ -1,3 +1,33 @@
+#!/usr/bin/env python3
+"""
+Knowledge Distillation Script for SageMaker Processing
+
+This script implements knowledge distillation to create smaller student models
+that mimic the behavior of larger teacher models.
+Metrics collection and analysis are handled in the notebook.
+"""
+
+import os
+import json
+import torch
+import argparse
+import logging
+import traceback
+import sys
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from transformers import AutoModelForTokenClassification, AutoModelForQuestionAnswering
+from transformers import AutoModelForMaskedLM, AutoConfig
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+logger = logging.getLogger(__name__)
+
 def enhanced_knowledge_transfer(teacher_model, student_model, task, logger):
     """Copy as many weights as possible from teacher to student."""
     try:
@@ -181,3 +211,155 @@ def enhanced_knowledge_transfer(teacher_model, student_model, task, logger):
         logger.error(f"Error during enhanced knowledge transfer: {e}")
         logger.error(traceback.format_exc())
         return False
+
+def create_student_model(teacher_model, model_name, task):
+    """Create a smaller student model based on the teacher model architecture."""
+    logger.info("Creating student model")
+    
+    # Get the teacher model configuration
+    if hasattr(teacher_model, "config"):
+        teacher_config = teacher_model.config
+    else:
+        raise ValueError("Teacher model does not have a config attribute")
+    
+    # Create a new configuration for the student model with fewer layers
+    student_config = AutoConfig.from_pretrained(model_name)
+    
+    # Reduce the number of layers (for BERT-like models)
+    if hasattr(student_config, "num_hidden_layers"):
+        student_config.num_hidden_layers = max(2, student_config.num_hidden_layers // 2)
+        logger.info(f"Reduced number of layers from {teacher_config.num_hidden_layers} to {student_config.num_hidden_layers}")
+    
+    # Reduce the hidden size (optional, but more complex)
+    # student_config.hidden_size = student_config.hidden_size // 2
+    
+    # Create the student model with the modified configuration
+    if task == "sequence-classification" or task == "text-classification":
+        student_model = AutoModelForSequenceClassification.from_config(student_config)
+    elif task == "token-classification":
+        student_model = AutoModelForTokenClassification.from_config(student_config)
+    elif task == "question-answering":
+        student_model = AutoModelForQuestionAnswering.from_config(student_config)
+    elif task == "masked-lm" or task == "fill-mask":
+        student_model = AutoModelForMaskedLM.from_config(student_config)
+    else:
+        raise ValueError(f"Unsupported task: {task}")
+    
+    return student_model
+
+def prepare_sample_inputs(tokenizer, task):
+    """Prepare sample inputs for the model based on its task."""
+    if task == "sequence-classification" or task == "text-classification":
+        text = "I really enjoyed this movie. The acting was superb and the plot was engaging."
+        inputs = tokenizer(text, return_tensors="pt")
+    elif task == "token-classification":
+        text = "Jeff Bezos founded Amazon in 1994 and the company is headquartered in Seattle, Washington."
+        inputs = tokenizer(text, return_tensors="pt")
+    elif task == "question-answering":
+        question = "What is machine learning?"
+        context = "Machine learning is a branch of artificial intelligence that focuses on building systems that learn from data."
+        inputs = tokenizer(question, context, return_tensors="pt")
+    elif task == "masked-lm" or task == "fill-mask":
+        text = "The [MASK] is a large language model trained by OpenAI."
+        inputs = tokenizer(text, return_tensors="pt")
+    else:
+        raise ValueError(f"Unsupported task: {task}")
+    
+    return inputs
+
+def main():
+    """Main function to run knowledge distillation."""
+    parser = argparse.ArgumentParser(description="Knowledge Distillation Script")
+    parser.add_argument("--model-info-path", type=str, required=True, help="Path to model info JSON file")
+    parser.add_argument("--output-dir", type=str, required=True, help="Output directory for distilled models")
+    args = parser.parse_args()
+    
+    # Set device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Using device: {device}")
+    
+    try:
+        # Load model info
+        logger.info(f"Loading model info from {args.model_info_path}")
+        if os.path.isdir(args.model_info_path):
+            # List files in the directory
+            logger.info(f"model_info_path is a directory. Contents: {os.listdir(args.model_info_path)}")
+            # Try to find a JSON file
+            json_files = [f for f in os.listdir(args.model_info_path) if f.endswith('.json')]
+            if json_files:
+                # Use the first JSON file found
+                model_info_file = os.path.join(args.model_info_path, json_files[0])
+                logger.info(f"Using JSON file: {model_info_file}")
+                with open(model_info_file, "r") as f:
+                    model_info = json.load(f)
+            else:
+                raise FileNotFoundError(f"No JSON files found in directory: {args.model_info_path}")
+        else:
+            # It's a file, load it directly
+            with open(args.model_info_path, "r") as f:
+                model_info = json.load(f)
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(args.output_dir, exist_ok=True)
+        
+        # Process each model
+        for model_key, info in model_info.items():
+            try:
+                model_name = info["model_name"]
+                task = info.get("task", "text-classification")
+                
+                logger.info(f"Processing model: {model_name} for task: {task}")
+                
+                # Load tokenizer
+                logger.info(f"Loading tokenizer: {model_name}")
+                tokenizer = AutoTokenizer.from_pretrained(model_name)
+                
+                # Load teacher model
+                logger.info(f"Loading teacher model: {model_name}")
+                if task == "sequence-classification" or task == "text-classification":
+                    teacher_model = AutoModelForSequenceClassification.from_pretrained(model_name)
+                elif task == "token-classification":
+                    teacher_model = AutoModelForTokenClassification.from_pretrained(model_name)
+                elif task == "question-answering":
+                    teacher_model = AutoModelForQuestionAnswering.from_pretrained(model_name)
+                elif task == "masked-lm" or task == "fill-mask":
+                    teacher_model = AutoModelForMaskedLM.from_pretrained(model_name)
+                else:
+                    raise ValueError(f"Unsupported task: {task}")
+                
+                teacher_model = teacher_model.to(device)
+                
+                # Create student model
+                student_model = create_student_model(teacher_model, model_name, task)
+                student_model = student_model.to(device)
+                
+                # Prepare inputs
+                inputs = prepare_sample_inputs(tokenizer, task)
+                inputs = {k: v.to(device) for k, v in inputs.items()}
+                
+                # Apply knowledge transfer
+                logger.info("Applying knowledge transfer")
+                success = enhanced_knowledge_transfer(teacher_model, student_model, task, logger)
+                if success:
+                    logger.info("Knowledge transfer successful")
+                else:
+                    logger.warning("Knowledge transfer had issues, but continuing with distillation")
+                
+                # Save student model
+                student_output_dir = os.path.join(args.output_dir, f"{model_key}_student")
+                os.makedirs(student_output_dir, exist_ok=True)
+                student_model.save_pretrained(student_output_dir)
+                tokenizer.save_pretrained(student_output_dir)
+                logger.info(f"Saved student model to {student_output_dir}")
+                
+            except Exception as e:
+                logger.error(f"Error processing model {model_key}: {e}")
+                logger.error(traceback.format_exc())
+    
+    except Exception as e:
+        logger.error(f"Error in distillation: {e}")
+        logger.error(traceback.format_exc())
+        sys.exit(1)
+
+if __name__ == "__main__":
+    main()
