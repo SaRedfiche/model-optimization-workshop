@@ -6,17 +6,16 @@ WANDA Pruning Script for SageMaker Processing
 
 This script implements the WANDA (Weight ANalysis for Deep leArning) pruning technique,
 which considers both weight magnitudes and activation statistics when deciding which weights to prune.
+Metrics collection and analysis are handled in the notebook.
 """
 
 import argparse
 import json
 import os
-import time
 import torch
 import numpy as np
 from transformers import AutoModelForSequenceClassification, AutoTokenizer, AutoModelForTokenClassification
 from transformers import AutoModelForQuestionAnswering, AutoModelForMaskedLM
-import psutil
 import gc
 
 
@@ -33,7 +32,7 @@ def parse_args():
         "--output-dir",
         type=str,
         required=True,
-        help="Directory to save the pruned model and metrics",
+        help="Directory to save the pruned model",
     )
     parser.add_argument(
         "--pruning-amount",
@@ -213,51 +212,6 @@ def wanda_pruning(model, activations, pruning_amount):
     return sparsity
 
 
-def measure_model_size(model):
-    """Measure the size of the model in MB."""
-    torch.save(model.state_dict(), "temp_model.pt")
-    size_mb = os.path.getsize("temp_model.pt") / (1024 * 1024)
-    os.remove("temp_model.pt")
-    return size_mb
-
-
-def measure_inference_time(model, inputs, num_runs=10):
-    """Measure inference time in milliseconds."""
-    # Warm-up
-    with torch.no_grad():
-        for _ in range(3):
-            _ = model(**inputs)
-    
-    # Measure inference time
-    start_time = time.time()
-    with torch.no_grad():
-        for _ in range(num_runs):
-            _ = model(**inputs)
-    end_time = time.time()
-    
-    avg_time_ms = (end_time - start_time) * 1000 / num_runs
-    return avg_time_ms
-
-
-def measure_memory_usage(model, inputs):
-    """Measure peak memory usage during inference in MB."""
-    # Clear cache
-    gc.collect()
-    torch.cuda.empty_cache() if torch.cuda.is_available() else None
-    
-    # Get baseline memory usage
-    baseline = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
-    
-    # Run inference
-    with torch.no_grad():
-        _ = model(**inputs)
-    
-    # Get peak memory usage
-    peak = psutil.Process(os.getpid()).memory_info().rss / (1024 * 1024)
-    
-    return peak - baseline
-
-
 def main():
     """Main function to run WANDA pruning."""
     args = parse_args()
@@ -272,18 +226,6 @@ def main():
     # Generate calibration data
     inputs = generate_calibration_data(tokenizer, task, args.calibration_samples)
     
-    # Measure baseline metrics
-    baseline_size = measure_model_size(model)
-    baseline_time = measure_inference_time(model, inputs)
-    
-    try:
-        baseline_memory = measure_memory_usage(model, inputs)
-    except Exception as e:
-        print(f"Warning: Could not measure baseline memory usage: {e}")
-        baseline_memory = 0
-    
-    print(f"Baseline metrics - Size: {baseline_size:.2f} MB, Inference time: {baseline_time:.2f} ms")
-    
     # Collect activation statistics
     print("Collecting activation statistics...")
     activations = collect_activation_statistics(model, inputs)
@@ -292,49 +234,11 @@ def main():
     print(f"Applying WANDA pruning with amount {args.pruning_amount}...")
     sparsity = wanda_pruning(model, activations, args.pruning_amount)
     
-    # Measure pruned metrics
-    pruned_size = measure_model_size(model)
-    pruned_time = measure_inference_time(model, inputs)
-    
-    try:
-        pruned_memory = measure_memory_usage(model, inputs)
-    except Exception as e:
-        print(f"Warning: Could not measure pruned memory usage: {e}")
-        pruned_memory = 0
-    
-    # Calculate improvements
-    size_reduction = (baseline_size - pruned_size) / baseline_size * 100 if baseline_size > 0 else 0
-    time_improvement = (baseline_time - pruned_time) / baseline_time * 100 if baseline_time > 0 else 0
-    memory_reduction = (baseline_memory - pruned_memory) / baseline_memory * 100 if baseline_memory > 0 else 0
-    
-    print(f"Pruned metrics - Size: {pruned_size:.2f} MB, Inference time: {pruned_time:.2f} ms")
-    print(f"Improvements - Size: {size_reduction:.2f}%, Time: {time_improvement:.2f}%")
-    
     # Save pruned model
-    output_model_dir = os.path.join(args.output_dir, "model")
+    output_model_dir = os.path.join(args.output_dir, f"{model_key}_pruned")
     os.makedirs(output_model_dir, exist_ok=True)
     model.save_pretrained(output_model_dir)
     tokenizer.save_pretrained(output_model_dir)
-    
-    # Save metrics
-    metrics = {
-        model_key: {
-            "model_name": model_info[model_key]["model_name"],
-            "pruning_method": "wanda",
-            "pruning_amount": args.pruning_amount,
-            "model_size": pruned_size,
-            "inference_time": pruned_time,
-            "memory_usage": pruned_memory,
-            "size_reduction": size_reduction,
-            "time_improvement": time_improvement,
-            "memory_reduction": memory_reduction,
-            "sparsity": sparsity * 100,  # Convert to percentage
-            "parameter_reduction": sparsity * 100  # Same as sparsity for now
-        }
-    }
-    
-    with open(os.path.join(args.output_dir, "wanda-pruned-metrics.json"), "w") as f:  # Using hyphens instead of underscores
-        json.dump(metrics, f, indent=2)
     
     print("WANDA pruning completed successfully!")
 
