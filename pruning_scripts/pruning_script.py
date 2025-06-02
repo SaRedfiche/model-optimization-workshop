@@ -1,63 +1,27 @@
 #!/usr/bin/env python3
 """
-Improved pruning script for model optimization workshop.
-This script applies pruning to transformer models with proper model size reduction.
-Metrics collection and analysis are handled in the notebook.
+Pruning script for model optimization workshop.
+This script applies pruning to transformer models and saves the pruned model.
 """
 
 import os
 import json
 import torch
 import argparse
-import numpy as np
 import logging
-import traceback
 import sys
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 from transformers import AutoModelForTokenClassification, AutoModelForQuestionAnswering
 from transformers import AutoModelForMaskedLM
 from torch.nn.utils import prune
 
-# Import specialized pruning libraries
-try:
-    import torch_pruning as tp
-    import onnx
-    from onnxruntime.transformers import optimizer as ort_optimizer
-    SPECIALIZED_LIBS_AVAILABLE = True
-except ImportError:
-    SPECIALIZED_LIBS_AVAILABLE = False
-    print("Warning: Specialized pruning libraries not available. Falling back to basic pruning.")
-
 # Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.StreamHandler(sys.stdout)]
 )
 logger = logging.getLogger(__name__)
-
-def prepare_sample_inputs(model_name, task, tokenizer, device):
-    """Prepare sample inputs for the model based on its task."""
-    if task == "sequence-classification" or task == "text-classification":
-        text = "I really enjoyed this movie. The acting was superb and the plot was engaging."
-        inputs = tokenizer(text, return_tensors="pt")
-    elif task == "token-classification":
-        text = "Jeff Bezos founded Amazon in 1994 and the company is headquartered in Seattle, Washington."
-        inputs = tokenizer(text, return_tensors="pt")
-    elif task == "question-answering":
-        question = "What is machine learning?"
-        context = "Machine learning is a branch of artificial intelligence that focuses on building systems that learn from data."
-        inputs = tokenizer(question, context, return_tensors="pt")
-    elif task == "masked-lm" or task == "fill-mask":
-        text = "The [MASK] is a large language model trained by OpenAI."
-        inputs = tokenizer(text, return_tensors="pt")
-    else:
-        raise ValueError(f"Unsupported task: {task}")
-    
-    # Move inputs to the appropriate device
-    return {k: v.to(device) for k, v in inputs.items()}
 
 def apply_structured_pruning(model, amount):
     """Apply structured pruning to remove entire neurons/filters."""
@@ -87,205 +51,88 @@ def apply_structured_pruning(model, amount):
     
     return model
 
-def apply_advanced_pruning(model, inputs, amount):
-    """Apply advanced pruning using torch_pruning library."""
-    logger.info("Applying advanced pruning with torch_pruning...")
+def main():
+    """Main function to run pruning."""
+    parser = argparse.ArgumentParser(description="Pruning script")
+    parser.add_argument("--model-info-path", type=str, required=True, help="Path to model info JSON file")
+    parser.add_argument("--output-dir", type=str, required=True, help="Output directory for pruned models")
+    parser.add_argument("--pruning-method", type=str, default="structured", help="Pruning method to use")
+    parser.add_argument("--pruning-amount", type=float, default=0.3, help="Amount of weights to prune (0.0 to 1.0)")
+    args = parser.parse_args()
     
-    if not SPECIALIZED_LIBS_AVAILABLE:
-        logger.warning("torch_pruning not available, falling back to basic structured pruning")
-        return apply_structured_pruning(model, amount)
-    
-    # Initialize pruner
-    example_inputs = tuple(inputs.values())
-    
-    # Create dependency graph
-    DG = tp.DependencyGraph()
-    DG.build_dependency(model, example_inputs=example_inputs)
-    
-    # Create pruning strategy
-    strategy = tp.strategy.L1Strategy()
-    
-    # Create pruner
-    pruner = tp.Pruner(
-        model,
-        DG,
-        strategy,
-        pruning_ratio=amount,
-        importance=tp.importance.MagnitudeImportance(p=1),  # L1 norm
-        global_pruning=True
-    )
-    
-    # Apply pruning
-    model = pruner.prune()
-    
-    return model
-
-def export_to_onnx(model, inputs, output_path):
-    """Export model to ONNX format with optimizations."""
-    logger.info(f"Exporting model to ONNX: {output_path}")
-    
-    # Prepare input names and dynamic axes
-    input_names = list(inputs.keys())
-    dynamic_axes = {name: {0: "batch_size"} for name in input_names}
-    
-    # Export to ONNX
-    torch.onnx.export(
-        model,
-        tuple(inputs.values()),
-        output_path,
-        input_names=input_names,
-        output_names=["output"],
-        dynamic_axes=dynamic_axes,
-        opset_version=13
-    )
-    
-    # Optimize ONNX model if libraries are available
-    if SPECIALIZED_LIBS_AVAILABLE:
-        try:
-            logger.info("Optimizing ONNX model...")
-            
-            # Load the model
-            onnx_model = onnx.load(output_path)
-            
-            # Optimize the model
-            # Note: This is a simplified version, actual optimization depends on model architecture
-            optimized_model_path = output_path.replace(".onnx", "_optimized.onnx")
-            
-            # Use a simplified optimization for any model type
-            opt_model = ort_optimizer.optimize_model(
-                output_path,
-                optimization_level=99  # Maximum optimization
-            )
-            
-            # Save the optimized model
-            opt_model.save_model_to_file(optimized_model_path)
-            logger.info(f"Saved optimized ONNX model to {optimized_model_path}")
-            
-            return optimized_model_path
-        except Exception as e:
-            logger.error(f"Error optimizing ONNX model: {e}")
-            logger.error(traceback.format_exc())
-            return output_path
-    else:
-        logger.warning("ONNX optimization libraries not available, skipping optimization")
-        return output_path
-
-def prune_model(model_key, model_info, pruning_method, pruning_amount, output_dir):
-    """Apply pruning to a model."""
-    logger.info(f"Pruning model: {model_key} with method: {pruning_method}, amount: {pruning_amount}")
-    
-    model_name = model_info["model_name"]
-    task = model_info["task"]
-    
-    # Set device
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    logger.info(f"Using device: {device}")
-    
-    # Load tokenizer
-    logger.info(f"Loading tokenizer: {model_name}")
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
-    
-    # Load model based on task
-    logger.info(f"Loading model: {model_name} for task: {task}")
-    if task == "sequence-classification" or task == "text-classification":
-        model = AutoModelForSequenceClassification.from_pretrained(model_name)
-    elif task == "token-classification":
-        model = AutoModelForTokenClassification.from_pretrained(model_name)
-    elif task == "question-answering":
-        model = AutoModelForQuestionAnswering.from_pretrained(model_name)
-    elif task == "masked-lm" or task == "fill-mask":
-        model = AutoModelForMaskedLM.from_pretrained(model_name)
-    else:
-        raise ValueError(f"Unsupported task: {task}")
-    
-    model = model.to(device)
-    model.eval()
-    
-    # Prepare sample inputs
-    inputs = prepare_sample_inputs(model_name, task, tokenizer, device)
-    
-    # Apply pruning based on method
-    if pruning_method == "l1_unstructured":
-        # Apply unstructured pruning (sets weights to zero but doesn't reduce model size)
-        for name, module in model.named_modules():
-            if isinstance(module, torch.nn.Linear):
-                prune.l1_unstructured(module, name='weight', amount=pruning_amount)
-                # Make pruning permanent by removing the reparameterization
-                prune.remove(module, 'weight')
-    elif pruning_method == "structured":
-        # Apply structured pruning (removes entire neurons)
-        model = apply_structured_pruning(model, pruning_amount)
-    elif pruning_method == "advanced":
-        # Apply advanced pruning with torch_pruning
-        model = apply_advanced_pruning(model, inputs, pruning_amount)
-    else:
-        raise ValueError(f"Unsupported pruning method: {pruning_method}")
-    
-    # Export to ONNX for further optimization
-    onnx_path = os.path.join(output_dir, f"{model_key}_pruned.onnx")
     try:
-        optimized_onnx_path = export_to_onnx(model, inputs, onnx_path)
-        logger.info(f"Exported model to ONNX: {optimized_onnx_path}")
-    except Exception as e:
-        logger.error(f"Error exporting to ONNX: {e}")
-        logger.error(traceback.format_exc())
-    
-    return model
-
-# Parse command-line arguments
-parser = argparse.ArgumentParser(description="Improved pruning script")
-parser.add_argument("--model-info-path", type=str, required=True, help="Path to model info JSON file")
-parser.add_argument("--output-dir", type=str, required=True, help="Output directory for pruned models")
-parser.add_argument("--pruning-method", type=str, default="structured", 
-                    choices=["l1_unstructured", "structured", "advanced"],
-                    help="Pruning method to use")
-parser.add_argument("--pruning-amount", type=float, default=0.3, 
-                    help="Amount of weights to prune (0.0 to 1.0)")
-args = parser.parse_args()
-
-try:
-    # Load model info
-    logger.info(f"Loading model info from {args.model_info_path}")
-    # Check if model_info_path is a directory
-    if os.path.isdir(args.model_info_path):
-        # List files in the directory
-        logger.info(f"model_info_path is a directory. Contents: {os.listdir(args.model_info_path)}")
-        # Try to find a JSON file
-        json_files = [f for f in os.listdir(args.model_info_path) if f.endswith('.json')]
-        if json_files:
-            # Use the first JSON file found
-            model_info_file = os.path.join(args.model_info_path, json_files[0])
-            logger.info(f"Using JSON file: {model_info_file}")
-            with open(model_info_file, "r") as f:
-                model_info = json.load(f)
+        # Load model info
+        logger.info(f"Loading model info from {args.model_info_path}")
+        if os.path.isdir(args.model_info_path):
+            # List files in the directory
+            logger.info(f"model_info_path is a directory. Contents: {os.listdir(args.model_info_path)}")
+            # Try to find a JSON file
+            json_files = [f for f in os.listdir(args.model_info_path) if f.endswith('.json')]
+            if json_files:
+                # Use the first JSON file found
+                model_info_file = os.path.join(args.model_info_path, json_files[0])
+                logger.info(f"Using JSON file: {model_info_file}")
+                with open(model_info_file, "r") as f:
+                    model_info = json.load(f)
+            else:
+                raise FileNotFoundError(f"No JSON files found in directory: {args.model_info_path}")
         else:
-            raise FileNotFoundError(f"No JSON files found in directory: {args.model_info_path}")
-    else:
-        # It's a file, load it directly
-        with open(args.model_info_path, "r") as f:
-            model_info = json.load(f)
+            # It's a file, load it directly
+            with open(args.model_info_path, "r") as f:
+                model_info = json.load(f)
+        
+        # Create output directory if it doesn't exist
+        os.makedirs(args.output_dir, exist_ok=True)
+        
+        # Process each model
+        for model_key, info in model_info.items():
+            try:
+                model_name = info["model_name"]
+                task = info.get("task", "text-classification")
+                
+                logger.info(f"Processing model: {model_name} for task: {task}")
+                
+                # Load tokenizer
+                logger.info(f"Loading tokenizer: {model_name}")
+                tokenizer = AutoTokenizer.from_pretrained(model_name)
+                
+                # Load model based on task
+                logger.info(f"Loading model: {model_name}")
+                if task == "sequence-classification" or task == "text-classification":
+                    model = AutoModelForSequenceClassification.from_pretrained(model_name)
+                elif task == "token-classification":
+                    model = AutoModelForTokenClassification.from_pretrained(model_name)
+                elif task == "question-answering":
+                    model = AutoModelForQuestionAnswering.from_pretrained(model_name)
+                elif task == "masked-lm" or task == "fill-mask":
+                    model = AutoModelForMaskedLM.from_pretrained(model_name)
+                else:
+                    raise ValueError(f"Unsupported task: {task}")
+                
+                # Apply pruning
+                logger.info(f"Applying {args.pruning_method} pruning with amount {args.pruning_amount}")
+                if args.pruning_method == "structured":
+                    model = apply_structured_pruning(model, args.pruning_amount)
+                else:
+                    raise ValueError(f"Unsupported pruning method: {args.pruning_method}")
+                
+                # Save pruned model
+                pruned_model_dir = os.path.join(args.output_dir, f"{model_key}_pruned")
+                os.makedirs(pruned_model_dir, exist_ok=True)
+                model.save_pretrained(pruned_model_dir)
+                tokenizer.save_pretrained(pruned_model_dir)
+                logger.info(f"Saved pruned model to {pruned_model_dir}")
+                
+            except Exception as e:
+                logger.error(f"Error processing model {model_key}: {e}")
+                import traceback
+                traceback.print_exc()
     
-    # Create output directory if it doesn't exist
-    os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Prune each model
-    for model_key, info in model_info.items():
-        try:
-            pruned_model = prune_model(
-                model_key, info, args.pruning_method, args.pruning_amount, args.output_dir
-            )
-            
-            # Save pruned model
-            model_dir = os.path.join(args.output_dir, f"{model_key}_pruned")
-            os.makedirs(model_dir, exist_ok=True)
-            pruned_model.save_pretrained(model_dir)
-            logger.info(f"Saved pruned model to {model_dir}")
-            
-        except Exception as e:
-            logger.error(f"Error pruning model {model_key}: {e}")
-            logger.error(traceback.format_exc())
+    except Exception as e:
+        logger.error(f"Error in pruning: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
-except Exception as e:
-    logger.error(f"Error in pruning: {e}")
-    logger.error(traceback.format_exc())
-    sys.exit(1)
+if __name__ == "__main__":
+    main()
