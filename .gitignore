@@ -54,3 +54,5 @@ scripts/utils/
 
 # No longer ignoring wanda_pruning_scripts
 # wanda_pruning_scripts/
+debug_ner/
+output/
