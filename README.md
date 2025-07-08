@@ -1,18 +1,16 @@
 # Model Optimization Workshop
 
-This workshop provides a hands-on experience for optimizing machine learning models to improve performance and reduce costs. You'll learn various optimization techniques including quantization, pruning, and knowledge distillation.
+This workshop provides a hands-on experience for optimizing machine learning models to improve performance and reduce costs. You'll learn various optimization techniques including quantization, pruning, knowledge distillation, and fine-tuning.
 
 ## Workshop Structure
 
 1. **Introduction and Setup** - Environment setup and model download
-2. **Baseline Evaluation** - Measuring baseline performance metrics
-3. **Quantization** - Applying quantization techniques
-4. **Pruning** - Implementing pruning techniques
-5. **Knowledge Distillation** - Creating smaller student models
-6. **Model Hosting** - Deploying models to AWS SageMaker
-7. **Inference Performance** - Comparing inference performance across models
-8. **Cost Analysis** - Analyzing cost implications and ROI
-9. **Resource Cleanup** - Cleaning up AWS resources
+2. **Quantization** - Applying quantization techniques
+3. **Pruning** - Implementing pruning techniques
+4. **Knowledge Distillation** - Creating smaller student models
+5. **Fine-tuning** - Adapting models to specific tasks
+6. **Cost Analysis** - Analyzing cost implications and ROI
+7. **Resource Cleanup** - Cleaning up AWS resources
 
 ## Prerequisites
 
