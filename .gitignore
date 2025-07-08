@@ -59,3 +59,6 @@ output/
 
 # Unused scripts
 unused_scripts/
+
+# Archive directory
+archive/
