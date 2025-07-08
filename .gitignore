@@ -56,3 +56,6 @@ scripts/utils/
 # wanda_pruning_scripts/
 debug_ner/
 output/
+
+# Unused scripts
+unused_scripts/
