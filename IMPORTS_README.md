@@ -18,16 +18,16 @@ The first notebook installs all dependencies and creates the workshop configurat
 
 ```python
 # Install core dependencies first
-!pip install -q numpy>=1.23.0 pandas>=1.5.3 matplotlib>=3.6.3 seaborn>=0.12.2
+!pip install -q "numpy>=1.23.0" "pandas>=1.5.3" "matplotlib>=3.6.3" "seaborn>=0.12.2"
 
 # Install PyTorch
-!pip install -q torch==2.0.0 torchvision==0.15.1 torchaudio==2.0.1
+!pip install -q "torch==2.0.0" "torchvision==0.15.1" "torchaudio==2.0.1"
 
 # Install transformers and related libraries
-!pip install -q transformers==4.26.0 datasets==2.10.1 accelerate==0.18.0
+!pip install -q "transformers==4.26.0" "datasets==2.10.1" "accelerate==0.18.0"
 
 # Install AWS libraries
-!pip install -q boto3>=1.35.0 sagemaker>=2.130.0
+!pip install -q "boto3>=1.35.0" "sagemaker>=2.130.0"
 
 # Import common modules
 from common_imports import *
@@ -105,13 +105,25 @@ RuntimeError: module was compiled against NumPy C-API version 0x10 (NumPy 1.23) 
 Try these solutions:
 1. Install the specific NumPy version required:
    ```
-   pip install numpy==1.23.0
+   pip install "numpy==1.23.0"
    ```
 2. Reinstall packages that depend on NumPy:
    ```
    pip uninstall -y torch torchvision torchaudio
-   pip install torch==2.0.0 torchvision==0.15.1 torchaudio==2.0.1
+   pip install "torch==2.0.0" "torchvision==0.15.1" "torchaudio==2.0.1"
    ```
+
+### Shell Redirection Issues
+
+If you see files being created with names like `0.12.2` when running pip install commands, it's because the shell is interpreting `>=` as redirection operators. Always quote package specifications:
+
+```
+# Incorrect (creates files named 1.23.0, 1.5.3, etc.)
+pip install numpy>=1.23.0 pandas>=1.5.3
+
+# Correct (properly installs packages)
+pip install "numpy>=1.23.0" "pandas>=1.5.3"
+```
 
 ### Missing Transformers Library
 
