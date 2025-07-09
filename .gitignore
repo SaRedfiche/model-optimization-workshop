@@ -33,6 +33,7 @@ wanda_notebook_checklist.md
 # Virtual Environment
 venv/
 ENV/
+test_venv/
 
 # AWS
 .aws-sam/
@@ -62,3 +63,13 @@ unused_scripts/
 
 # Archive directory
 archive/
+
+# Test files
+tests/
+test_*.py
+*_test.py
+
+# Local testing Python files
+*.py
+!scripts/*.py
+TESTING.md
