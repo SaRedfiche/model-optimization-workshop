@@ -68,8 +68,20 @@ archive/
 tests/
 test_*.py
 *_test.py
+scripts/test_*.py
+scripts/test_*.sh
 
 # Local testing Python files
 *.py
 !scripts/*.py
+!scripts/train_sentiment.py
 TESTING.md
+
+# Data directories
+data/
+fine_tuned_model/
+logs/
+
+# SageMaker specific
+.sagemaker/
+model/
