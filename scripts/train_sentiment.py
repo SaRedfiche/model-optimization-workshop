@@ -1,214 +1,151 @@
-#!/usr/bin/env python
-# coding=utf-8
-
+import argparse
 import logging
 import os
 import sys
-from dataclasses import dataclass, field
-from typing import Optional
-
-from datasets import load_dataset
+import numpy as np
+import torch
+from datasets import load_from_disk
 from transformers import (
-    AutoConfig,
     AutoModelForSequenceClassification,
     AutoTokenizer,
-    HfArgumentParser,
     Trainer,
     TrainingArguments,
-    default_data_collator,
-    set_seed,
+    DataCollatorWithPadding
+)
+from sklearn.metrics import accuracy_score, precision_recall_fscore_support
+
+# Set up logging
+logger = logging.getLogger(__name__)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
 )
 
-logger = logging.getLogger(__name__)
+def compute_metrics(pred):
+    """Compute metrics for evaluation."""
+    labels = pred.label_ids
+    preds = pred.predictions.argmax(-1)
+    precision, recall, f1, _ = precision_recall_fscore_support(labels, preds, average='binary')
+    acc = accuracy_score(labels, preds)
+    return {
+        'accuracy': acc,
+        'f1': f1,
+        'precision': precision,
+        'recall': recall
+    }
 
-@dataclass
-class DataTrainingArguments:
-    """
-    Arguments pertaining to what data we are going to input our model for training and eval.
-    """
-    train_file: Optional[str] = field(
-        default=None, metadata={"help": "A csv or a json file containing the training data."}
-    )
-    validation_file: Optional[str] = field(
-        default=None, metadata={"help": "A csv or a json file containing the validation data."}
-    )
-    max_seq_length: int = field(
-        default=128,
-        metadata={
-            "help": "The maximum total input sequence length after tokenization."
-        },
-    )
-    overwrite_cache: bool = field(
-        default=False, metadata={"help": "Overwrite the cached preprocessed datasets or not."}
-    )
-    pad_to_max_length: bool = field(
-        default=True,
-        metadata={
-            "help": "Whether to pad all samples to `max_seq_length`."
-        },
-    )
-    max_train_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": "For debugging purposes or quicker training, truncate the number of training examples to this "
-            "value if set."
-        },
-    )
-    max_eval_samples: Optional[int] = field(
-        default=None,
-        metadata={
-            "help": "For debugging purposes or quicker training, truncate the number of evaluation examples to this "
-            "value if set."
-        },
-    )
-
-@dataclass
-class ModelArguments:
-    """
-    Arguments pertaining to which model/config/tokenizer we are going to fine-tune from.
-    """
-    model_name_or_path: str = field(
-        metadata={"help": "Path to pretrained model or model identifier from huggingface.co/models"}
-    )
-    config_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained config name or path if not the same as model_name"}
-    )
-    tokenizer_name: Optional[str] = field(
-        default=None, metadata={"help": "Pretrained tokenizer name or path if not the same as model_name"}
-    )
-    cache_dir: Optional[str] = field(
-        default=None,
-        metadata={"help": "Where do you want to store the pretrained models downloaded from huggingface.co"},
-    )
-    use_fast_tokenizer: bool = field(
-        default=True,
-        metadata={"help": "Whether to use one of the fast tokenizer (backed by the tokenizers library) or not."},
-    )
-    model_revision: str = field(
-        default="main",
-        metadata={"help": "The specific model version to use (can be a branch name, tag name or commit id)."},
-    )
-    use_auth_token: bool = field(
-        default=False,
-        metadata={
-            "help": "Will use the token generated when running `transformers-cli login` (necessary to use this script "
-            "with private models)."
-        },
-    )
+def parse_args():
+    """Parse command line arguments."""
+    parser = argparse.ArgumentParser()
+    
+    # Data, model, and output directories
+    parser.add_argument("--model-dir", type=str, default=os.environ["SM_MODEL_DIR"])
+    parser.add_argument("--training-dir", type=str, default=os.environ["SM_CHANNEL_TRAIN"])
+    parser.add_argument("--test-dir", type=str, default=os.environ["SM_CHANNEL_TEST"])
+    parser.add_argument("--output-data-dir", type=str, default=os.environ["SM_OUTPUT_DATA_DIR"])
+    
+    # Training hyperparameters
+    parser.add_argument("--epochs", type=int, default=3)
+    parser.add_argument("--train-batch-size", type=int, default=32)
+    parser.add_argument("--eval-batch-size", type=int, default=64)
+    parser.add_argument("--learning-rate", type=float, default=5e-5)
+    parser.add_argument("--warmup-steps", type=int, default=500)
+    parser.add_argument("--model-id", type=str, default="distilbert-base-uncased")
+    parser.add_argument("--fp16", type=bool, default=True)
+    
+    return parser.parse_args()
 
 def main():
-    # Parse arguments
-    parser = HfArgumentParser((ModelArguments, DataTrainingArguments, TrainingArguments))
-    model_args, data_args, training_args = parser.parse_args_into_dataclasses()
+    """Main training function."""
+    args = parse_args()
     
-    # Setup logging
-    logging.basicConfig(
-        format="%(asctime)s - %(levelname)s - %(name)s - %(message)s",
-        datefmt="%m/%d/%Y %H:%M:%S",
-        handlers=[logging.StreamHandler(sys.stdout)],
-    )
-
-    logger.setLevel(logging.INFO)
+    # Set up device
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info(f"Using device: {device}")
     
-    # Set seed before initializing model
-    set_seed(training_args.seed)
-
     # Load datasets
-    data_files = {}
-    if data_args.train_file is not None:
-        data_files["train"] = data_args.train_file
-    if data_args.validation_file is not None:
-        data_files["validation"] = data_args.validation_file
+    logger.info(f"Loading datasets from {args.training_dir} and {args.test_dir}")
+    train_dataset = load_from_disk(args.training_dir)
+    test_dataset = load_from_disk(args.test_dir)
     
-    # Loading the dataset from local json files
-    raw_datasets = load_dataset("json", data_files=data_files)
+    logger.info(f"Train dataset size: {len(train_dataset)}")
+    logger.info(f"Test dataset size: {len(test_dataset)}")
     
-    # Load pretrained model and tokenizer
-    config = AutoConfig.from_pretrained(
-        model_args.config_name if model_args.config_name else model_args.model_name_or_path,
-        num_labels=2,
-        cache_dir=model_args.cache_dir,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
-    )
-    
-    tokenizer = AutoTokenizer.from_pretrained(
-        model_args.tokenizer_name if model_args.tokenizer_name else model_args.model_name_or_path,
-        cache_dir=model_args.cache_dir,
-        use_fast=model_args.use_fast_tokenizer,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
-    )
-    
+    # Load model and tokenizer
+    logger.info(f"Loading model: {args.model_id}")
     model = AutoModelForSequenceClassification.from_pretrained(
-        model_args.model_name_or_path,
-        from_tf=bool(".ckpt" in model_args.model_name_or_path),
-        config=config,
-        cache_dir=model_args.cache_dir,
-        revision=model_args.model_revision,
-        use_auth_token=True if model_args.use_auth_token else None,
+        args.model_id, 
+        num_labels=2  # Binary classification
+    )
+    tokenizer = AutoTokenizer.from_pretrained(args.model_id)
+    
+    # Set up data collator
+    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
+    
+    # Set up distributed training
+    is_distributed = len(os.environ.get("SM_HOSTS", [])) > 1
+    if is_distributed:
+        logger.info("Distributed training enabled")
+        world_size = int(os.environ.get("SM_NUM_GPUS", 1)) * len(os.environ.get("SM_HOSTS", []))
+        logger.info(f"World size: {world_size}")
+    else:
+        logger.info("Distributed training not enabled")
+    
+    # Set up training arguments
+    training_args = TrainingArguments(
+        output_dir=args.output_data_dir,
+        num_train_epochs=args.epochs,
+        per_device_train_batch_size=args.train_batch_size,
+        per_device_eval_batch_size=args.eval_batch_size,
+        warmup_steps=args.warmup_steps,
+        learning_rate=args.learning_rate,
+        evaluation_strategy="epoch",
+        save_strategy="epoch",
+        logging_dir=f"{args.output_data_dir}/logs",
+        logging_steps=100,
+        fp16=args.fp16,  # Enable mixed precision training
+        load_best_model_at_end=True,
+        metric_for_best_model="f1",
+        save_total_limit=2,  # Only keep the 2 best checkpoints
+        report_to="tensorboard",
+        # Distributed training settings
+        ddp_find_unused_parameters=False if is_distributed else None,
     )
     
-    # Preprocessing the datasets
-    # Define the function to tokenize the examples
-    def preprocess_function(examples):
-        return tokenizer(
-            examples["text"],
-            padding="max_length" if data_args.pad_to_max_length else False,
-            max_length=data_args.max_seq_length,
-            truncation=True,
-        )
-    
-    # Apply preprocessing to datasets
-    processed_datasets = raw_datasets.map(
-        preprocess_function,
-        batched=True,
-        remove_columns=raw_datasets["train"].column_names,
-        desc="Running tokenizer on dataset",
-    )
-    
-    train_dataset = processed_datasets["train"]
-    eval_dataset = processed_datasets["validation"] if "validation" in processed_datasets else None
-    
-    # Data collator
-    data_collator = default_data_collator
-    
-    # Initialize Trainer
+    # Set up trainer
     trainer = Trainer(
         model=model,
         args=training_args,
         train_dataset=train_dataset,
-        eval_dataset=eval_dataset,
+        eval_dataset=test_dataset,
         tokenizer=tokenizer,
         data_collator=data_collator,
+        compute_metrics=compute_metrics
     )
     
-    # Training
-    checkpoint = None
-    if training_args.resume_from_checkpoint is not None:
-        checkpoint = training_args.resume_from_checkpoint
-    elif hasattr(training_args, 'last_checkpoint') and training_args.last_checkpoint is not None:
-        checkpoint = training_args.last_checkpoint
+    # Train the model
+    logger.info("Starting training...")
+    trainer.train()
     
-    train_result = trainer.train(resume_from_checkpoint=checkpoint)
-    metrics = train_result.metrics
-    trainer.save_model()  # Saves the tokenizer too
+    # Evaluate the model
+    logger.info("Evaluating model...")
+    eval_result = trainer.evaluate()
+    logger.info(f"Evaluation results: {eval_result}")
     
-    # Save metrics
-    trainer.log_metrics("train", metrics)
-    trainer.save_metrics("train", metrics)
-    trainer.save_state()
+    # Save the model
+    logger.info(f"Saving model to {args.model_dir}")
+    trainer.save_model(args.model_dir)
+    tokenizer.save_pretrained(args.model_dir)
     
-    # Evaluation
-    if eval_dataset is not None:
-        logger.info("*** Evaluate ***")
-        metrics = trainer.evaluate(eval_dataset=eval_dataset)
-        trainer.log_metrics("eval", metrics)
-        trainer.save_metrics("eval", metrics)
+    # Save evaluation results
+    with open(os.path.join(args.model_dir, "eval_results.txt"), "w") as f:
+        for key, value in eval_result.items():
+            f.write(f"{key} = {value}\n")
     
-    # Save model to S3
-    if os.environ.get("SM_MODEL_DIR") is not None:
-        trainer.save_model(os.environ.get("SM_MODEL_DIR"))
+    logger.info("Training completed!")
 
 if __name__ == "__main__":
     main()
