@@ -2,15 +2,13 @@
 
 This workshop provides a hands-on experience for optimizing machine learning models to improve performance and reduce costs. You'll learn various optimization techniques including quantization, pruning, knowledge distillation, and fine-tuning.
 
-## Standardized Imports
+## Dependency Management
 
-This workshop uses a standardized import system to simplify dependencies and avoid conflicts:
+This workshop uses a minimal dependency approach where each notebook manages its own dependencies:
 
-- **Unified Requirements**: All dependencies are in a single `requirements.txt` file with pinned versions
-- **Common Imports**: Frequently used imports are centralized in `common_imports.py`
-- **Workshop Configuration**: Shared configuration is stored in `workshop_config.json`
-
-For more details, see [IMPORTS_README.md](IMPORTS_README.md).
+- Each notebook installs only the packages it needs
+- Version requirements are specified directly in each notebook
+- Common settings are stored in `workshop_config.json`
 
 ## Workshop Structure
 
@@ -101,7 +99,6 @@ If you prefer to run the workshop locally:
 
 ## Documentation
 
-- `IMPORTS_README.md` - Details on standardized imports and dependency management
 - `cloudformation/README.md` - Instructions for deploying with CloudFormation
 - `model_optimization_techniques.md` - Overview of model optimization techniques
 - `quantization_deep_dive.md` - Detailed explanation of quantization methods
