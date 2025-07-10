@@ -118,11 +118,10 @@ def quantize_model(args):
         model.save_pretrained(temp_model_path)
         tokenizer.save_pretrained(temp_model_path)
         
-        # Now load with ORT
+        # Now load with ORT - using correct API without from_transformers parameter
         logger.info("Loading converted model with ONNX Runtime...")
         ort_model = ORTModelForSequenceClassification.from_pretrained(
             temp_model_path, 
-            from_transformers=True,
             export=True
         )
         
@@ -131,10 +130,9 @@ def quantize_model(args):
         
     else:
         logger.info("Classification model detected - loading directly")
-        # Load the model and tokenizer directly
+        # Load the model and tokenizer directly - using correct API without from_transformers parameter
         ort_model = ORTModelForSequenceClassification.from_pretrained(
             model_path, 
-            from_transformers=True,
             export=True
         )
         tokenizer = AutoTokenizer.from_pretrained(model_path)
