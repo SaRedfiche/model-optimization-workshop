@@ -40,8 +40,17 @@ def install_dependencies():
     """Install required dependencies."""
     logger.info("Installing required dependencies...")
     
-    # Install required libraries
-    os.system("pip install transformers torch datasets accelerate evaluate")
+    # Install from requirements file with Python 3.10 compatible versions
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    requirements_file = os.path.join(script_dir, "distillation_requirements.txt")
+    
+    if os.path.exists(requirements_file):
+        logger.info(f"Installing from {requirements_file}")
+        os.system(f"pip install -r {requirements_file}")
+    else:
+        # Fallback to specific versions if requirements file not found
+        logger.info("Requirements file not found, installing specific versions...")
+        os.system("pip install 'torch>=2.4.0,<3.0.0' 'transformers>=4.44.0,<5.0.0' 'datasets>=2.20.0,<3.0.0' 'accelerate>=0.33.0,<1.0.0' 'evaluate>=0.4.0,<1.0.0'")
     
     logger.info("Dependencies installed successfully")
 

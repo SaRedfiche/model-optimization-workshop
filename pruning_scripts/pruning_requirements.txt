@@ -1,0 +1,5 @@
+# Pruning-specific requirements - Python 3.10 compatible versions
+torch>=2.4.0,<3.0.0
+transformers>=4.44.0,<5.0.0
+numpy>=1.26.0,<2.0.0
+torch-pruning>=1.4.0,<2.0.0

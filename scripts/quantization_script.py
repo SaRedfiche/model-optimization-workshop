@@ -36,8 +36,17 @@ def install_dependencies():
     """Install required dependencies."""
     logger.info("Installing required dependencies...")
     
-    # Install optimum and onnxruntime
-    os.system("pip install optimum[onnxruntime] onnx onnxruntime")
+    # Install from requirements file with Python 3.10 compatible versions
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    requirements_file = os.path.join(script_dir, "quantization_requirements.txt")
+    
+    if os.path.exists(requirements_file):
+        logger.info(f"Installing from {requirements_file}")
+        os.system(f"pip install -r {requirements_file}")
+    else:
+        # Fallback to specific versions if requirements file not found
+        logger.info("Requirements file not found, installing specific versions...")
+        os.system("pip install 'optimum>=1.21.0,<2.0.0' 'onnx>=1.16.0,<2.0.0' 'onnxruntime>=1.18.0,<2.0.0'")
     
     logger.info("Dependencies installed successfully")
 

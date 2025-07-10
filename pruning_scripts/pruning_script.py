@@ -35,8 +35,17 @@ def install_dependencies():
     """Install required dependencies."""
     logger.info("Installing required dependencies...")
     
-    # Install pruning libraries
-    os.system("pip install torch-pruning transformers torch numpy")
+    # Install from requirements file with Python 3.10 compatible versions
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    requirements_file = os.path.join(script_dir, "pruning_requirements.txt")
+    
+    if os.path.exists(requirements_file):
+        logger.info(f"Installing from {requirements_file}")
+        os.system(f"pip install -r {requirements_file}")
+    else:
+        # Fallback to specific versions if requirements file not found
+        logger.info("Requirements file not found, installing specific versions...")
+        os.system("pip install 'torch>=2.4.0,<3.0.0' 'transformers>=4.44.0,<5.0.0' 'numpy>=1.26.0,<2.0.0' 'torch-pruning>=1.4.0,<2.0.0'")
     
     logger.info("Dependencies installed successfully")
 
