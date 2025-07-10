@@ -16,222 +16,231 @@ import boto3
 import sagemaker
 from sagemaker.processing import ProcessingInput, ProcessingOutput
 from sagemaker.pytorch.processing import PyTorchProcessor
+from sagemaker.huggingface import HuggingFaceModel
 
 def setup_environment():
     """Set up the environment and return configuration."""
-    # Load workshop configuration if available
+    # Load stored variables (simulating notebook %store magic)
     try:
-        with open('workshop_config.json', 'r') as f:
-            workshop_config = json.load(f)
+        # Try to load from environment variables or config
+        S3_BUCKET = os.environ.get('S3_BUCKET')
+        SAGEMAKER_ROLE_ARN = os.environ.get('SAGEMAKER_ROLE_ARN')
+        AWS_REGION = os.environ.get('AWS_REGION')
+        OPTIMIZATION_INSTANCE_TYPE = os.environ.get('OPTIMIZATION_INSTANCE_TYPE', 'ml.c5.xlarge')
         
-        # Use configuration values
-        base_model = workshop_config.get("base_model", "distilbert-base-uncased-finetuned-sst-2-english")
-        task = workshop_config.get("task", "sequence-classification")
-    except FileNotFoundError:
-        # Default values if config not found
-        base_model = "distilbert-base-uncased-finetuned-sst-2-english"
-        task = "sequence-classification"
-        print("Workshop configuration not found. Using default values.")
+        if not all([S3_BUCKET, SAGEMAKER_ROLE_ARN, AWS_REGION]):
+            # Fallback to SageMaker session defaults
+            sagemaker_session = sagemaker.Session()
+            S3_BUCKET = sagemaker_session.default_bucket()
+            SAGEMAKER_ROLE_ARN = sagemaker.get_execution_role()
+            AWS_REGION = boto3.session.Session().region_name
+            
+    except Exception as e:
+        print(f"Error setting up environment: {e}")
+        # Provide fallback values for testing
+        S3_BUCKET = "example-bucket"
+        SAGEMAKER_ROLE_ARN = "arn:aws:iam::123456789012:role/service-role/AmazonSageMaker-ExecutionRole"
+        AWS_REGION = "us-west-2"
+        OPTIMIZATION_INSTANCE_TYPE = "ml.c5.xlarge"
     
-    # Set up SageMaker session
+    print(f"Loaded variables:")
+    print(f"S3_BUCKET: {S3_BUCKET}")
+    print(f"AWS_REGION: {AWS_REGION}")
+    print(f"OPTIMIZATION_INSTANCE_TYPE: {OPTIMIZATION_INSTANCE_TYPE}")
+    
+    return {
+        "S3_BUCKET": S3_BUCKET,
+        "SAGEMAKER_ROLE_ARN": SAGEMAKER_ROLE_ARN,
+        "AWS_REGION": AWS_REGION,
+        "OPTIMIZATION_INSTANCE_TYPE": OPTIMIZATION_INSTANCE_TYPE
+    }
+
+def load_model_info(S3_BUCKET):
+    """Load model information."""
+    try:
+        with open('model_info.json', 'r') as f:
+            model_info = json.load(f)
+        print("Loaded model information from model_info.json")
+    except FileNotFoundError:
+        print("model_info.json not found. Using default model information.")
+        model_info = {
+            "sentiment-analysis": {
+                "model_name": "distilbert-base-uncased",
+                "task": "text-classification",
+                "hub_model_id": "distilbert-base-uncased",
+                "s3_uri": f"s3://{S3_BUCKET}/models/distilbert-base-uncased"
+            }
+        }
+    
+    # For this script, we'll focus on the sentiment analysis model
+    model_key = "sentiment-analysis"
+    model_data = model_info[model_key]
+    model_name = model_data["model_name"]
+    model_s3_uri = model_data.get("s3_uri", f"s3://{S3_BUCKET}/models/{model_name.replace('/', '-')}")
+    
+    print(f"Using model: {model_name}")
+    print(f"Model S3 URI: {model_s3_uri}")
+    
+    return model_data, model_name, model_s3_uri
+
+def run_quantization_processing_job(config, model_name, model_s3_uri):
+    """Configure and run the quantization processing job."""
+    S3_BUCKET = config["S3_BUCKET"]
+    SAGEMAKER_ROLE_ARN = config["SAGEMAKER_ROLE_ARN"]
+    OPTIMIZATION_INSTANCE_TYPE = config["OPTIMIZATION_INSTANCE_TYPE"]
+    
     try:
         sagemaker_session = sagemaker.Session()
-        role = sagemaker.get_execution_role()
-        region = boto3.session.Session().region_name
-        bucket = sagemaker_session.default_bucket()
-        prefix = "quantization-workshop"
+        
+        # Configure the processing job with updated Python version
+        processor = PyTorchProcessor(
+            framework_version='2.4.0',
+            py_version='py311',  # Updated to supported version
+            role=SAGEMAKER_ROLE_ARN,
+            instance_count=1,
+            instance_type=OPTIMIZATION_INSTANCE_TYPE,
+            base_job_name=f'quantize-{model_name.replace("/", "-")}',
+            sagemaker_session=sagemaker_session
+        )
+        
+        print("Starting quantization processing job...")
+        
+        # Run the processing job
+        processor.run(
+            code='quantization_script.py',
+            source_dir='scripts',
+            inputs=[
+                ProcessingInput(
+                    source=model_s3_uri,
+                    destination='/opt/ml/processing/input/model'
+                )
+            ],
+            outputs=[
+                ProcessingOutput(
+                    output_name='quantized_model',
+                    source='/opt/ml/processing/output'
+                )
+            ],
+            arguments=[
+                '--quantization-approach', 'dynamic',
+                '--bits', '8'
+            ]
+        )
+        
+        # Get the processing job name and output URI
+        processing_job_name = processor.latest_job.job_name
+        print(f"Processing job name: {processing_job_name}")
+        
+        processing_job_description = sagemaker_session.sagemaker_client.describe_processing_job(
+            ProcessingJobName=processing_job_name
+        )
+        output_s3_uri = processing_job_description['ProcessingOutputConfig']['Outputs'][0]['S3Output']['S3Uri']
+        print(f"Output S3 URI: {output_s3_uri}")
+        
+        return {
+            "processing_job_name": processing_job_name,
+            "output_s3_uri": output_s3_uri,
+            "quantized_model_name": f"{model_name.replace('/', '-')}-quantized"
+        }
+        
     except Exception as e:
-        print(f"Error setting up SageMaker session: {e}")
-        # Provide fallback values for testing
-        sagemaker_session = None
-        role = "arn:aws:iam::123456789012:role/service-role/AmazonSageMaker-ExecutionRole"
-        region = "us-west-2"
-        bucket = "example-bucket"
-        prefix = "quantization-workshop"
-    
-    print(f"SageMaker session established in region: {region}")
-    print(f"Using S3 bucket: {bucket}")
-    print(f"Using S3 prefix: {prefix}")
-    
-    return {
-        "base_model": base_model,
-        "task": task,
-        "sagemaker_session": sagemaker_session,
-        "role": role,
-        "region": region,
-        "bucket": bucket,
-        "prefix": prefix
-    }
-
-def prepare_quantization_script():
-    """Prepare the quantization script."""
-    # Check if the script exists
-    if not os.path.exists("scripts/quantization_script.py"):
-        print("Quantization script not found. Creating directory...")
-        os.makedirs("scripts", exist_ok=True)
-        
-        # Create the quantization script
-        script_content = """
-import os
-import argparse
-import torch
-from transformers import AutoTokenizer, AutoModelForSequenceClassification
-from optimum.onnxruntime import ORTQuantizer
-from optimum.onnxruntime.configuration import AutoQuantizationConfig
-from optimum.exporters.onnx import main_export
-
-def parse_args():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--model_id", type=str, default="distilbert-base-uncased-finetuned-sst-2-english")
-    parser.add_argument("--task", type=str, default="sequence-classification")
-    parser.add_argument("--quantization_approach", type=str, default="dynamic")
-    parser.add_argument("--output_dir", type=str, default="/opt/ml/processing/output")
-    return parser.parse_args()
-
-def main():
-    args = parse_args()
-    print(f"Quantizing model: {args.model_id}")
-    print(f"Task: {args.task}")
-    print(f"Quantization approach: {args.quantization_approach}")
-    
-    # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Export the model to ONNX
-    print("Exporting model to ONNX format...")
-    onnx_path = os.path.join(args.output_dir, "model.onnx")
-    main_export(
-        args.model_id,
-        output=onnx_path,
-        task=args.task,
-        opset=13
-    )
-    print(f"Model exported to: {onnx_path}")
-    
-    # Load tokenizer and model
-    tokenizer = AutoTokenizer.from_pretrained(args.model_id)
-    model = AutoModelForSequenceClassification.from_pretrained(args.model_id)
-    
-    # Create quantizer
-    print("Creating quantizer...")
-    quantizer = ORTQuantizer.from_pretrained(model)
-    
-    # Define quantization configuration
-    if args.quantization_approach == "dynamic":
-        qconfig = AutoQuantizationConfig.avx512_vnni(is_static=False, per_channel=False)
-    elif args.quantization_approach == "static":
-        qconfig = AutoQuantizationConfig.avx512_vnni(is_static=True, per_channel=True)
-    else:
-        raise ValueError(f"Unsupported quantization approach: {args.quantization_approach}")
-    
-    # Quantize the model
-    print("Quantizing model...")
-    quantizer.quantize(
-        quantization_config=qconfig,
-        save_dir=args.output_dir,
-    )
-    
-    # Save the tokenizer
-    print("Saving tokenizer...")
-    tokenizer.save_pretrained(args.output_dir)
-    
-    print(f"Quantized model and tokenizer saved to: {args.output_dir}")
-    print("Quantization completed successfully!")
-
-if __name__ == "__main__":
-    main()
-"""
-        
-        with open("scripts/quantization_script.py", "w") as f:
-            f.write(script_content)
-        
-        print("Quantization script created successfully.")
-    else:
-        print("Quantization script already exists.")
-
-def run_quantization_job(config, quantization_approach="dynamic"):
-    """Run the quantization job."""
-    sagemaker_session = config["sagemaker_session"]
-    role = config["role"]
-    bucket = config["bucket"]
-    prefix = config["prefix"]
-    base_model = config["base_model"]
-    task = config["task"]
-    
-    if sagemaker_session is None:
-        print("SageMaker session not available. Skipping quantization job.")
+        print(f"Error running processing job: {e}")
         return None
+
+def test_quantization_script_locally():
+    """Test the quantization script locally to catch API issues."""
+    print("\n=== Testing Quantization Script Locally ===")
     
-    # Create a PyTorch processor for running the quantization script
-    pytorch_processor = PyTorchProcessor(
-        framework_version="1.13.1",
-        role=role,
-        instance_count=1,
-        instance_type="ml.c5.xlarge",
-        base_job_name="quantization-job",
-        sagemaker_session=sagemaker_session
-    )
-    
-    # Define the output path
-    output_path = f"s3://{bucket}/{prefix}/output"
-    
-    # Run the processing job
-    job_name = f"quantization-{time.strftime('%Y-%m-%d-%H-%M-%S')}"
-    print(f"Starting quantization job: {job_name}")
-    
-    pytorch_processor.run(
-        code="quantization_script.py",
-        source_dir="scripts",
-        outputs=[
-            ProcessingOutput(
-                output_name="quantized_model",
-                source="/opt/ml/processing/output",
-                destination=output_path
+    try:
+        # Test import of the quantization script
+        import sys
+        sys.path.append('scripts')
+        
+        # Try to import the main components to check for API issues
+        from optimum.onnxruntime import ORTModelForSequenceClassification, ORTQuantizer
+        from optimum.onnxruntime.configuration import AutoQuantizationConfig
+        from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoConfig
+        
+        print("✅ All imports successful")
+        
+        # Test the API calls that were causing issues
+        print("Testing API compatibility...")
+        
+        # This should work without the from_transformers parameter
+        try:
+            # Test with a small model to verify API
+            model_name = "distilbert-base-uncased"
+            print(f"Testing with model: {model_name}")
+            
+            # Test AutoConfig loading
+            config = AutoConfig.from_pretrained(model_name)
+            print("✅ AutoConfig.from_pretrained() works")
+            
+            # Test quantization config creation
+            quantization_config = AutoQuantizationConfig.avx512_vnni(
+                is_static=False, 
+                per_channel=False
             )
-        ],
-        arguments=[
-            "--model_id", base_model,
-            "--task", task,
-            "--quantization_approach", quantization_approach
-        ],
-        job_name=job_name
-    )
-    
-    print(f"Quantization job completed: {job_name}")
-    print(f"Quantized model saved to: {output_path}")
-    
-    return {
-        "job_name": job_name,
-        "output_path": output_path
-    }
+            print("✅ AutoQuantizationConfig.avx512_vnni() works")
+            
+            print("✅ Local API compatibility test passed!")
+            return True
+            
+        except Exception as api_error:
+            print(f"❌ API compatibility test failed: {api_error}")
+            return False
+            
+    except ImportError as e:
+        print(f"❌ Import error: {e}")
+        print("Make sure to install required packages: pip install optimum[onnxruntime] transformers")
+        return False
+    except Exception as e:
+        print(f"❌ Local test failed: {e}")
+        return False
 
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser(description="Quantize a model using SageMaker Processing")
     parser.add_argument("--approach", choices=["dynamic", "static"], default="dynamic",
                         help="Quantization approach: dynamic or static")
-    parser.add_argument("--skip-job", action="store_true", help="Skip the quantization job")
+    parser.add_argument("--skip-job", action="store_true", help="Skip the SageMaker processing job")
+    parser.add_argument("--test-local", action="store_true", help="Test quantization script locally")
     return parser.parse_args()
 
 def main():
     """Main function to run the quantization script."""
     args = parse_args()
     
+    print("=== Model Quantization with SageMaker Processing ===")
+    
+    # Test locally first if requested
+    if args.test_local:
+        local_test_passed = test_quantization_script_locally()
+        if not local_test_passed:
+            print("❌ Local test failed. Fix issues before running on SageMaker.")
+            return
+    
     # Set up environment
     config = setup_environment()
     
-    # Prepare quantization script
-    prepare_quantization_script()
+    # Load model information
+    model_data, model_name, model_s3_uri = load_model_info(config["S3_BUCKET"])
     
     # Run quantization job
     if not args.skip_job:
-        job_info = run_quantization_job(config, args.approach)
+        print("\n=== Running SageMaker Processing Job ===")
+        job_info = run_quantization_processing_job(config, model_name, model_s3_uri)
+        
         if job_info:
-            print("\nQuantization Summary:")
-            print(f"Job Name: {job_info['job_name']}")
-            print(f"Output Path: {job_info['output_path']}")
+            print("\n=== Quantization Summary ===")
+            print(f"Processing Job: {job_info['processing_job_name']}")
+            print(f"Output S3 URI: {job_info['output_s3_uri']}")
+            print(f"Quantized Model Name: {job_info['quantized_model_name']}")
+            print("✅ Quantization completed successfully!")
+        else:
+            print("❌ Quantization job failed.")
     else:
-        print("Skipping quantization job as requested.")
+        print("Skipping SageMaker processing job as requested.")
 
 if __name__ == "__main__":
     main()

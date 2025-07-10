@@ -358,16 +358,16 @@ def main():
         {'Name': 'eval:f1', 'Regex': 'eval_f1: ([0-9\\.]+)'},
     ]
     
-    # Create Hugging Face estimator
+    # Create Hugging Face estimator with updated versions
     huggingface_estimator = HuggingFace(
         entry_point='train.py',
         source_dir='./scripts',
         instance_type=args.instance_type,
         instance_count=args.instance_count,
         role=role,
-        transformers_version='4.26.0',
-        pytorch_version='1.13.1',
-        py_version='py39',
+        transformers_version='4.44.0',
+        pytorch_version='2.4.0',
+        py_version='py311',
         hyperparameters=hyperparameters,
         metric_definitions=metric_definitions,
         output_path=output_path
