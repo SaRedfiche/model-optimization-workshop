@@ -45,7 +45,7 @@ def quantize_model(args):
     """Quantize the model using Optimum."""
     from optimum.onnxruntime import ORTModelForSequenceClassification, ORTQuantizer
     from optimum.onnxruntime.configuration import AutoQuantizationConfig
-    from transformers import AutoTokenizer
+    from transformers import AutoTokenizer, AutoModelForSequenceClassification, AutoConfig
     import torch
     
     logger.info(f"Starting quantization with approach: {args.quantization_approach}, bits: {args.bits}")
@@ -70,14 +70,49 @@ def quantize_model(args):
     model_path = str(input_path)
     logger.info(f"Using model from: {model_path}")
     
-    # Load the model and tokenizer - fail if this doesn't work
-    logger.info("Loading model and tokenizer...")
-    model = ORTModelForSequenceClassification.from_pretrained(
-        model_path, 
-        from_transformers=True,
-        export=True
-    )
-    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    # Check if this is a base model or already a classification model
+    logger.info("Checking model configuration...")
+    config = AutoConfig.from_pretrained(model_path)
+    
+    # If it's a base model (no num_labels), convert it to sequence classification
+    if not hasattr(config, 'num_labels') or config.num_labels is None:
+        logger.info("Base model detected - converting to sequence classification model")
+        
+        # Load as sequence classification model with 2 labels (binary classification)
+        model = AutoModelForSequenceClassification.from_pretrained(
+            model_path, 
+            num_labels=2,
+            ignore_mismatched_sizes=True
+        )
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+        
+        # Save the converted model to a temporary directory
+        temp_model_path = os.path.join(args.output_dir, "temp_classification_model")
+        os.makedirs(temp_model_path, exist_ok=True)
+        model.save_pretrained(temp_model_path)
+        tokenizer.save_pretrained(temp_model_path)
+        
+        # Now load with ORT
+        logger.info("Loading converted model with ONNX Runtime...")
+        ort_model = ORTModelForSequenceClassification.from_pretrained(
+            temp_model_path, 
+            from_transformers=True,
+            export=True
+        )
+        
+        # Clean up temp directory
+        shutil.rmtree(temp_model_path)
+        
+    else:
+        logger.info("Classification model detected - loading directly")
+        # Load the model and tokenizer directly
+        ort_model = ORTModelForSequenceClassification.from_pretrained(
+            model_path, 
+            from_transformers=True,
+            export=True
+        )
+        tokenizer = AutoTokenizer.from_pretrained(model_path)
+    
     logger.info("Model and tokenizer loaded successfully")
     
     # Configure quantization
@@ -93,7 +128,7 @@ def quantize_model(args):
         )
     
     # Create quantizer
-    quantizer = ORTQuantizer.from_pretrained(model)
+    quantizer = ORTQuantizer.from_pretrained(ort_model)
     
     # Apply quantization
     logger.info("Applying quantization...")
