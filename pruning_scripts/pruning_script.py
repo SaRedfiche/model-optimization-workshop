@@ -42,120 +42,111 @@ def install_dependencies():
 
 def prune_model(args):
     """Prune the model using PyTorch pruning utilities."""
-    try:
-        import torch
-        import torch.nn.utils.prune as prune
-        from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    import torch
+    import torch.nn.utils.prune as prune
+    from transformers import AutoModelForSequenceClassification, AutoTokenizer
+    
+    logger.info(f"Starting pruning with approach: {args.pruning_approach}, sparsity: {args.sparsity}")
+    
+    # Create output directory
+    os.makedirs(args.output_dir, exist_ok=True)
+    
+    # Validate input directory exists and contains model files
+    input_path = Path(args.input_dir)
+    if not input_path.exists():
+        raise FileNotFoundError(f"Input directory does not exist: {args.input_dir}")
+    
+    model_files = list(input_path.glob("**/*.bin")) + list(input_path.glob("**/*.safetensors"))
+    config_files = list(input_path.glob("**/config.json"))
+    
+    if not model_files:
+        raise FileNotFoundError(f"No model files (.bin or .safetensors) found in {input_path}")
+    
+    if not config_files:
+        raise FileNotFoundError(f"No config.json found in {input_path}")
+    
+    model_path = str(input_path)
+    logger.info(f"Using model from: {model_path}")
+    
+    # Load the model and tokenizer - fail if this doesn't work
+    logger.info("Loading model and tokenizer...")
+    model = AutoModelForSequenceClassification.from_pretrained(model_path)
+    tokenizer = AutoTokenizer.from_pretrained(model_path)
+    logger.info("Model and tokenizer loaded successfully")
+    
+    # Apply pruning
+    logger.info(f"Applying {args.pruning_approach} pruning with {args.sparsity} sparsity...")
+    
+    if args.pruning_approach == "unstructured":
+        # Apply unstructured pruning to linear layers
+        parameters_to_prune = []
+        for name, module in model.named_modules():
+            if isinstance(module, torch.nn.Linear):
+                parameters_to_prune.append((module, 'weight'))
         
-        logger.info(f"Starting pruning with approach: {args.pruning_approach}, sparsity: {args.sparsity}")
+        # Apply global unstructured pruning
+        prune.global_unstructured(
+            parameters_to_prune,
+            pruning_method=prune.L1Unstructured,
+            amount=args.sparsity,
+        )
         
-        # Create output directory
-        os.makedirs(args.output_dir, exist_ok=True)
-        
-        # Try to find the model in the input directory
-        input_path = Path(args.input_dir)
-        model_files = list(input_path.glob("**/*.bin")) + list(input_path.glob("**/*.safetensors"))
-        
-        if not model_files:
-            # If no model files found, assume we need to download from HuggingFace
-            model_name = "distilbert-base-uncased-finetuned-sst-2-english"
-            logger.info(f"No model files found in {input_path}, using default model: {model_name}")
-        else:
-            # Use the input directory as model path
-            model_name = str(input_path)
-            logger.info(f"Using model from: {model_name}")
-        
-        # Load the model and tokenizer
-        logger.info("Loading model and tokenizer...")
-        try:
-            model = AutoModelForSequenceClassification.from_pretrained(model_name)
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-        except Exception as e:
-            logger.warning(f"Failed to load model from {model_name}: {e}")
-            # Fallback to default model
-            model_name = "distilbert-base-uncased-finetuned-sst-2-english"
-            model = AutoModelForSequenceClassification.from_pretrained(model_name)
-            tokenizer = AutoTokenizer.from_pretrained(model_name)
-        
-        logger.info("Model and tokenizer loaded successfully")
-        
-        # Apply pruning
-        logger.info(f"Applying {args.pruning_approach} pruning with {args.sparsity} sparsity...")
-        
-        if args.pruning_approach == "unstructured":
-            # Apply unstructured pruning to linear layers
-            parameters_to_prune = []
-            for name, module in model.named_modules():
-                if isinstance(module, torch.nn.Linear):
-                    parameters_to_prune.append((module, 'weight'))
+        # Make pruning permanent
+        for module, param_name in parameters_to_prune:
+            prune.remove(module, param_name)
             
-            # Apply global unstructured pruning
-            prune.global_unstructured(
-                parameters_to_prune,
-                pruning_method=prune.L1Unstructured,
-                amount=args.sparsity,
-            )
-            
-            # Make pruning permanent
-            for module, param_name in parameters_to_prune:
-                prune.remove(module, param_name)
+    else:  # structured pruning
+        # Apply structured pruning (remove entire neurons/channels)
+        for name, module in model.named_modules():
+            if isinstance(module, torch.nn.Linear) and hasattr(module, 'weight'):
+                # Calculate number of neurons to prune
+                num_neurons = module.weight.size(0)
+                num_to_prune = int(num_neurons * args.sparsity)
                 
-        else:  # structured pruning
-            # Apply structured pruning (remove entire neurons/channels)
-            for name, module in model.named_modules():
-                if isinstance(module, torch.nn.Linear) and hasattr(module, 'weight'):
-                    # Calculate number of neurons to prune
-                    num_neurons = module.weight.size(0)
-                    num_to_prune = int(num_neurons * args.sparsity)
-                    
-                    if num_to_prune > 0:
-                        # Apply structured pruning
-                        prune.ln_structured(
-                            module, 
-                            name='weight', 
-                            amount=num_to_prune, 
-                            n=2, 
-                            dim=0
-                        )
-                        # Make pruning permanent
-                        prune.remove(module, 'weight')
-        
-        # Calculate sparsity
-        total_params = 0
-        zero_params = 0
-        for param in model.parameters():
-            total_params += param.numel()
-            zero_params += (param == 0).sum().item()
-        
-        actual_sparsity = zero_params / total_params
-        logger.info(f"Achieved sparsity: {actual_sparsity:.4f}")
-        
-        # Save pruned model
-        output_path = os.path.join(args.output_dir, "pruned_model")
-        os.makedirs(output_path, exist_ok=True)
-        
-        model.save_pretrained(output_path)
-        tokenizer.save_pretrained(output_path)
-        
-        # Create model info file
-        model_info = {
-            "pruning_approach": args.pruning_approach,
-            "target_sparsity": args.sparsity,
-            "actual_sparsity": actual_sparsity,
-            "original_model": model_name,
-            "pruned_model_path": output_path,
-            "total_parameters": total_params,
-            "zero_parameters": zero_params
-        }
-        
-        with open(os.path.join(args.output_dir, "pruning_info.json"), "w") as f:
-            json.dump(model_info, f, indent=2)
-        
-        logger.info(f"Pruning completed successfully. Output saved to: {output_path}")
-        
-    except Exception as e:
-        logger.error(f"Error during pruning: {e}")
-        raise
+                if num_to_prune > 0:
+                    # Apply structured pruning
+                    prune.ln_structured(
+                        module, 
+                        name='weight', 
+                        amount=num_to_prune, 
+                        n=2, 
+                        dim=0
+                    )
+                    # Make pruning permanent
+                    prune.remove(module, 'weight')
+    
+    # Calculate sparsity
+    total_params = 0
+    zero_params = 0
+    for param in model.parameters():
+        total_params += param.numel()
+        zero_params += (param == 0).sum().item()
+    
+    actual_sparsity = zero_params / total_params
+    logger.info(f"Achieved sparsity: {actual_sparsity:.4f}")
+    
+    # Save pruned model
+    output_path = os.path.join(args.output_dir, "pruned_model")
+    os.makedirs(output_path, exist_ok=True)
+    
+    model.save_pretrained(output_path)
+    tokenizer.save_pretrained(output_path)
+    
+    # Create model info file
+    model_info = {
+        "pruning_approach": args.pruning_approach,
+        "target_sparsity": args.sparsity,
+        "actual_sparsity": actual_sparsity,
+        "original_model": model_path,
+        "pruned_model_path": output_path,
+        "total_parameters": total_params,
+        "zero_parameters": zero_params
+    }
+    
+    with open(os.path.join(args.output_dir, "pruning_info.json"), "w") as f:
+        json.dump(model_info, f, indent=2)
+    
+    logger.info(f"Pruning completed successfully. Output saved to: {output_path}")
 
 def main():
     """Main function."""

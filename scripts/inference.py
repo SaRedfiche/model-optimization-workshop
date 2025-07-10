@@ -26,8 +26,17 @@ def model_fn(model_dir: str):
     """
     logger.info(f"Loading model from {model_dir}")
     
-    try:
-        # Try to load ONNX model first
+    # Check what type of model we have in the directory
+    model_files = os.listdir(model_dir)
+    has_onnx = any(f.endswith('.onnx') for f in model_files)
+    has_pytorch = any(f.endswith(('.bin', '.safetensors')) for f in model_files)
+    
+    if not has_onnx and not has_pytorch:
+        raise FileNotFoundError(f"No model files found in {model_dir}")
+    
+    if has_onnx:
+        # Load ONNX model
+        logger.info("Loading ONNX quantized model...")
         from optimum.onnxruntime import ORTModelForSequenceClassification
         from transformers import AutoTokenizer
         
@@ -37,22 +46,19 @@ def model_fn(model_dir: str):
         logger.info("Successfully loaded ONNX quantized model")
         return {"model": model, "tokenizer": tokenizer, "type": "onnx"}
         
-    except Exception as e:
-        logger.warning(f"Failed to load ONNX model: {e}")
+    elif has_pytorch:
+        # Load PyTorch model
+        logger.info("Loading PyTorch model...")
+        from transformers import AutoModelForSequenceClassification, AutoTokenizer
         
-        # Fallback to regular PyTorch model
-        try:
-            from transformers import AutoModelForSequenceClassification, AutoTokenizer
-            
-            model = AutoModelForSequenceClassification.from_pretrained(model_dir)
-            tokenizer = AutoTokenizer.from_pretrained(model_dir)
-            
-            logger.info("Successfully loaded PyTorch model")
-            return {"model": model, "tokenizer": tokenizer, "type": "pytorch"}
-            
-        except Exception as pytorch_error:
-            logger.error(f"Failed to load PyTorch model: {pytorch_error}")
-            raise
+        model = AutoModelForSequenceClassification.from_pretrained(model_dir)
+        tokenizer = AutoTokenizer.from_pretrained(model_dir)
+        
+        logger.info("Successfully loaded PyTorch model")
+        return {"model": model, "tokenizer": tokenizer, "type": "pytorch"}
+    
+    else:
+        raise ValueError(f"Unsupported model format in {model_dir}")
 
 def input_fn(request_body: str, content_type: str = "application/json") -> Dict[str, Any]:
     """
@@ -139,12 +145,11 @@ def predict_fn(input_data: Dict[str, Any], model_artifacts: Dict[str, Any]) -> L
             pred_id = torch.argmax(probs).item()
             confidence = probs[pred_id].item()
             
-            # Get label from model config
+            # Get label from model config - fail if not available
             if hasattr(model.config, 'id2label') and model.config.id2label:
                 label = model.config.id2label[pred_id]
             else:
-                # Default labels for sentiment analysis
-                label = "POSITIVE" if pred_id == 1 else "NEGATIVE"
+                raise ValueError(f"Model config missing id2label mapping. Cannot determine label for prediction ID {pred_id}")
             
             predictions.append({
                 "label": label,
