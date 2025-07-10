@@ -10,6 +10,7 @@ import sys
 import json
 import logging
 import shutil
+import tarfile
 from pathlib import Path
 
 # Set up logging
@@ -36,7 +37,7 @@ def install_dependencies():
     """Install required dependencies."""
     logger.info("Installing required dependencies...")
     
-    # Install from requirements file with Python 3.10 compatible versions
+    # Install from requirements file with Python 3.11 compatible versions
     script_dir = os.path.dirname(os.path.abspath(__file__))
     requirements_file = os.path.join(script_dir, "quantization_requirements.txt")
     
@@ -62,22 +63,38 @@ def quantize_model(args):
     # Create output directory
     os.makedirs(args.output_dir, exist_ok=True)
     
-    # Validate input directory exists and contains model files
+    # Validate input directory exists
     input_path = Path(args.input_dir)
     if not input_path.exists():
         raise FileNotFoundError(f"Input directory does not exist: {args.input_dir}")
     
-    model_files = list(input_path.glob("**/*.bin")) + list(input_path.glob("**/*.safetensors"))
-    config_files = list(input_path.glob("**/config.json"))
-    
-    if not model_files:
-        raise FileNotFoundError(f"No model files (.bin or .safetensors) found in {input_path}")
-    
-    if not config_files:
-        raise FileNotFoundError(f"No config.json found in {input_path}")
-    
-    model_path = str(input_path)
-    logger.info(f"Using model from: {model_path}")
+    # Check if we have a compressed model file (model.tar.gz)
+    tar_files = list(input_path.glob("**/*.tar.gz"))
+    if tar_files:
+        logger.info(f"Found compressed model file: {tar_files[0]}")
+        # Extract the tar.gz file
+        extract_path = input_path / "extracted_model"
+        os.makedirs(extract_path, exist_ok=True)
+        
+        with tarfile.open(tar_files[0], "r:gz") as tar:
+            tar.extractall(extract_path)
+        
+        # Update model path to the extracted directory
+        model_path = str(extract_path)
+        logger.info(f"Extracted model to: {model_path}")
+    else:
+        # Check for direct model files
+        model_files = list(input_path.glob("**/*.bin")) + list(input_path.glob("**/*.safetensors"))
+        config_files = list(input_path.glob("**/config.json"))
+        
+        if not model_files:
+            raise FileNotFoundError(f"No model files (.bin, .safetensors, or .tar.gz) found in {input_path}")
+        
+        if not config_files:
+            raise FileNotFoundError(f"No config.json found in {input_path}")
+        
+        model_path = str(input_path)
+        logger.info(f"Using model from: {model_path}")
     
     # Check if this is a base model or already a classification model
     logger.info("Checking model configuration...")
