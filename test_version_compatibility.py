@@ -103,7 +103,7 @@ def test_sagemaker_versions():
                 'role': 'arn:aws:iam::123456789012:role/test',
                 'instance_type': 'ml.g4dn.xlarge',
                 'transformers_version': '4.49.0',
-                'pytorch_version': '2.4.0',
+                'pytorch_version': '2.6.0',
                 'py_version': 'py311'
             }
             print("✅ HuggingFace estimator with supported versions is supported")

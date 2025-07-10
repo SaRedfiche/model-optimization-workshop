@@ -366,7 +366,7 @@ def main():
         instance_count=args.instance_count,
         role=role,
         transformers_version='4.49.0',
-        pytorch_version='2.4.0',
+        pytorch_version='2.6.0',
         py_version='py311',
         hyperparameters=hyperparameters,
         metric_definitions=metric_definitions,
