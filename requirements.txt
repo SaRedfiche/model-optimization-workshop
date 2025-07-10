@@ -1,14 +1,14 @@
-# Core ML libraries - specific versions to avoid compatibility issues
-torch==2.0.0
-torchvision==0.15.1
-torchaudio==2.0.1
-transformers==4.26.0
-datasets==2.10.1
-accelerate==0.18.0
-optimum==1.8.0
-onnx==1.13.0
-onnxruntime==1.14.0
-sentencepiece==0.1.97
+# Core ML libraries - updated versions for compatibility
+torch>=2.2.0
+torchvision>=0.17.0
+torchaudio>=2.2.0
+transformers>=4.30.0
+datasets>=2.14.0
+accelerate>=0.20.0
+optimum>=1.12.0
+onnx>=1.14.0
+onnxruntime>=1.15.0
+sentencepiece>=0.1.99
 
 # AWS libraries - minimum versions
 boto3>=1.26.0

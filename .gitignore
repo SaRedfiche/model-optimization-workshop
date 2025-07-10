@@ -1,10 +1,18 @@
-# Python
+# Python virtual environments
+venv/
+env/
+ENV/
+.venv/
+.env/
+
+# Python cache files
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
+
+# Distribution / packaging
 .Python
-env/
 build/
 develop-eggs/
 dist/
@@ -16,72 +24,114 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
+pip-wheel-metadata/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
-# Backup files
-backups/
-*.bak
+# PyInstaller
+*.manifest
+*.spec
 
-# Development checklists and notes
-wanda_notebook_checklist.md
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
 
-# Jupyter Notebook
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+
+# Jupyter Notebook checkpoints
 .ipynb_checkpoints
 
-# Virtual Environment
-venv/
-ENV/
-test_venv/
+# IPython
+profile_default/
+ipython_config.py
 
-# AWS
-.aws-sam/
-.aws-sam-iacs/
-.chalice/deployments/
-.chalice/venv/
+# pyenv
+.python-version
 
-# IDE
-.idea/
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery stuff
+celerybeat-schedule
+celerybeat.pid
+
+# SageMaker Studio
+.sagemaker-code-config
+
+# AWS credentials (never commit these!)
+.aws/
+*.pem
+*.key
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# IDE files
 .vscode/
+.idea/
 *.swp
 *.swo
+*~
 
-# Mac OS
+# OS generated files
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
 
-# Utility scripts
-scripts/utils/
+# Model files and data (often too large for git)
+*.pkl
+*.joblib
+*.h5
+*.hdf5
+*.pb
+*.ckpt
+*.pth
+*.pt
+*.bin
+*.safetensors
 
-# No longer ignoring wanda_pruning_scripts
-# wanda_pruning_scripts/
-debug_ner/
-output/
+# Large data files
+*.csv
+*.tsv
+*.json
+*.parquet
+*.feather
+*.xlsx
+*.xls
 
-# Unused scripts
-unused_scripts/
-
-# Archive directory
-archive/
-
-# Test files
-tests/
-test_*.py
-*_test.py
-scripts/test_*.py
-scripts/test_*.sh
-
-# Local testing Python files
-*.py
-!scripts/*.py
-!scripts/train_sentiment.py
-TESTING.md
-
-# Data directories
-data/
-fine_tuned_model/
+# Logs
+*.log
 logs/
 
-# SageMaker specific
-.sagemaker/
-model/
+# Temporary files
+*.tmp
+*.temp
+temp/
+tmp/
