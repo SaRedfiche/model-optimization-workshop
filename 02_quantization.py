@@ -105,7 +105,7 @@ def run_quantization_processing_job(config, model_name, model_s3_uri):
         
         print("Starting quantization processing job...")
         
-        # Run the processing job
+        # Run the processing job with explicit wait control
         processor.run(
             code='quantization_script.py',
             source_dir='scripts',
@@ -124,7 +124,9 @@ def run_quantization_processing_job(config, model_name, model_s3_uri):
             arguments=[
                 '--quantization-approach', 'dynamic',
                 '--bits', '8'
-            ]
+            ],
+            wait=True,  # Explicitly set wait behavior
+            logs=True   # Show logs during execution
         )
         
         # Get the processing job name and output URI
