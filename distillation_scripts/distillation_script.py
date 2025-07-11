@@ -200,9 +200,20 @@ def distill_model(args):
     )
     tokenizer = AutoTokenizer.from_pretrained(teacher_data['model_name'])
     
+    # Determine the best device to use
+    if torch.cuda.is_available():
+        device = torch.device("cuda")
+        logger.info("Using CUDA device")
+    else:
+        device = torch.device("cpu")
+        logger.info("Using CPU device")
+    
+    teacher_model = teacher_model.to(device)
+    
     # Create student model
     logger.info("Creating student model...")
     student_model = create_student_model(student_config, teacher_model)
+    student_model = student_model.to(device)
     
     # Create synthetic dataset
     logger.info("Creating training dataset...")
@@ -228,7 +239,7 @@ def distill_model(args):
             self.alpha = alpha
             self.teacher_model.eval()
         
-        def compute_loss(self, model, inputs, return_outputs=False):
+        def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
             # Get student outputs
             student_outputs = model(**inputs)
             student_logits = student_outputs.logits
@@ -266,6 +277,8 @@ def distill_model(args):
         save_strategy="epoch",
         load_best_model_at_end=False,
         report_to=None,  # Disable wandb/tensorboard
+        use_mps_device=False,  # Disable MPS to avoid issues on macOS
+        dataloader_pin_memory=False,  # Disable pin memory for compatibility
     )
     
     # Create data collator

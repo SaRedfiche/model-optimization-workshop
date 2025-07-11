@@ -343,11 +343,19 @@ def main():
         return
     
     if args.monitor:
-        # Just monitor existing jobs
+        # Monitor existing jobs using saved job information
         print("📊 Monitoring existing jobs...")
-        # This would need job names from previous runs
-        # For now, just show the pattern
-        print("To monitor jobs, you need the job names from previous runs.")
+        try:
+            with open('distillation_jobs.json', 'r') as f:
+                job_info = json.load(f)
+            
+            job_names = job_info.get('job_names', [])
+            if job_names:
+                monitor_jobs(job_names)
+            else:
+                print("No job names found in distillation_jobs.json")
+        except FileNotFoundError:
+            print("No distillation_jobs.json found. Run distillation jobs first.")
         return
     
     # Create SageMaker processor
