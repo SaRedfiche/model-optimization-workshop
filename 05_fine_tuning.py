@@ -172,7 +172,7 @@ import os
 import sys
 import numpy as np
 import torch
-from datasets import load_from_disk
+from datasets import load_from_disk, Dataset
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -237,8 +237,33 @@ def main():
     
     # Load datasets
     logger.info(f"Loading datasets from {args.training_dir} and {args.validation_dir}")
-    train_dataset = load_from_disk(args.training_dir)
-    validation_dataset = load_from_disk(args.validation_dir)
+    try:
+        train_dataset = load_from_disk(args.training_dir)
+        validation_dataset = load_from_disk(args.validation_dir)
+    except Exception as e:
+        logger.error(f"Error loading datasets with load_from_disk: {e}")
+        logger.info("Attempting to load datasets as individual files...")
+        
+        # Try loading as individual files if load_from_disk fails
+        import json
+        
+        # Load training data
+        train_files = [f for f in os.listdir(args.training_dir) if f.endswith('.json')]
+        if train_files:
+            with open(os.path.join(args.training_dir, train_files[0]), 'r') as f:
+                train_data = json.load(f)
+            train_dataset = Dataset.from_list(train_data)
+        else:
+            raise ValueError(f"No JSON files found in {args.training_dir}")
+        
+        # Load validation data
+        val_files = [f for f in os.listdir(args.validation_dir) if f.endswith('.json')]
+        if val_files:
+            with open(os.path.join(args.validation_dir, val_files[0]), 'r') as f:
+                val_data = json.load(f)
+            validation_dataset = Dataset.from_list(val_data)
+        else:
+            raise ValueError(f"No JSON files found in {args.validation_dir}")
     
     logger.info(f"Train dataset size: {len(train_dataset)}")
     logger.info(f"Validation dataset size: {len(validation_dataset)}")
@@ -246,9 +271,17 @@ def main():
     # Load tokenizer and model
     logger.info(f"Loading model and tokenizer for {args.model_name}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    
+    # Get number of unique labels
+    try:
+        num_labels = len(train_dataset.unique("labels"))
+    except:
+        # Fallback: assume binary classification
+        num_labels = 2
+    
     model = AutoModelForSequenceClassification.from_pretrained(
         args.model_name, 
-        num_labels=len(train_dataset.unique("labels"))
+        num_labels=num_labels
     )
     
     # Set up training arguments
@@ -263,6 +296,8 @@ def main():
         learning_rate=args.learning_rate,
         load_best_model_at_end=True,
         metric_for_best_model="f1",
+        save_strategy="epoch",
+        logging_steps=10,
     )
     
     # Create Trainer instance
@@ -366,8 +401,8 @@ def main():
         instance_count=args.instance_count,
         role=role,
         transformers_version='4.49.0',
-        pytorch_version='2.6.0',
-        py_version='py312',
+        pytorch_version='2.5.1',
+        py_version='py311',
         hyperparameters=hyperparameters,
         metric_definitions=metric_definitions,
         output_path=output_path

@@ -5,10 +5,9 @@ import argparse
 import logging
 import os
 import sys
-import json
 import numpy as np
 import torch
-from torch.utils.data import Dataset, DataLoader
+from datasets import load_from_disk, Dataset
 from transformers import (
     AutoModelForSequenceClassification,
     AutoTokenizer,
@@ -25,22 +24,6 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
     handlers=[logging.StreamHandler(sys.stdout)]
 )
-
-class SentimentDataset(Dataset):
-    def __init__(self, json_file):
-        with open(json_file, 'r') as f:
-            self.data = json.load(f)
-    
-    def __len__(self):
-        return len(self.data)
-    
-    def __getitem__(self, idx):
-        item = self.data[idx]
-        return {
-            'input_ids': torch.tensor(item['input_ids'], dtype=torch.long),
-            'attention_mask': torch.tensor(item['attention_mask'], dtype=torch.long),
-            'labels': torch.tensor(item['labels'], dtype=torch.long)
-        }
 
 def compute_metrics(pred):
     """
@@ -87,10 +70,35 @@ def main():
     """
     args = parse_args()
     
-    # Load datasets from JSON files
+    # Load datasets
     logger.info(f"Loading datasets from {args.training_dir} and {args.validation_dir}")
-    train_dataset = SentimentDataset(os.path.join(args.training_dir, "train.json"))
-    validation_dataset = SentimentDataset(os.path.join(args.validation_dir, "validation.json"))
+    try:
+        train_dataset = load_from_disk(args.training_dir)
+        validation_dataset = load_from_disk(args.validation_dir)
+    except Exception as e:
+        logger.error(f"Error loading datasets with load_from_disk: {e}")
+        logger.info("Attempting to load datasets as individual files...")
+        
+        # Try loading as individual files if load_from_disk fails
+        import json
+        
+        # Load training data
+        train_files = [f for f in os.listdir(args.training_dir) if f.endswith('.json')]
+        if train_files:
+            with open(os.path.join(args.training_dir, train_files[0]), 'r') as f:
+                train_data = json.load(f)
+            train_dataset = Dataset.from_list(train_data)
+        else:
+            raise ValueError(f"No JSON files found in {args.training_dir}")
+        
+        # Load validation data
+        val_files = [f for f in os.listdir(args.validation_dir) if f.endswith('.json')]
+        if val_files:
+            with open(os.path.join(args.validation_dir, val_files[0]), 'r') as f:
+                val_data = json.load(f)
+            validation_dataset = Dataset.from_list(val_data)
+        else:
+            raise ValueError(f"No JSON files found in {args.validation_dir}")
     
     logger.info(f"Train dataset size: {len(train_dataset)}")
     logger.info(f"Validation dataset size: {len(validation_dataset)}")
@@ -98,9 +106,17 @@ def main():
     # Load tokenizer and model
     logger.info(f"Loading model and tokenizer for {args.model_name}")
     tokenizer = AutoTokenizer.from_pretrained(args.model_name)
+    
+    # Get number of unique labels
+    try:
+        num_labels = len(train_dataset.unique("labels"))
+    except:
+        # Fallback: assume binary classification
+        num_labels = 2
+    
     model = AutoModelForSequenceClassification.from_pretrained(
         args.model_name, 
-        num_labels=2  # Binary classification for sentiment
+        num_labels=num_labels
     )
     
     # Set up training arguments
@@ -146,6 +162,12 @@ def main():
     logger.info(f"Saving model to {args.model_dir}")
     trainer.save_model(args.model_dir)
     tokenizer.save_pretrained(args.model_dir)
+    
+    # Save special tokens file
+    special_tokens_map_file = os.path.join(args.model_dir, "special_tokens_map.json")
+    if not os.path.exists(special_tokens_map_file):
+        with open(special_tokens_map_file, "w") as f:
+            f.write("{}")
     
     logger.info("Training completed!")
 
