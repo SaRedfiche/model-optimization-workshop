@@ -4,8 +4,13 @@ Knowledge Distillation script for SageMaker Processing Jobs.
 This script performs knowledge distillation to create smaller student models.
 """
 
-import argparse
+# Force CPU usage at the very beginning to avoid MPS issues
 import os
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+os.environ["CUDA_VISIBLE_DEVICES"] = ""
+os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
+
+import argparse
 import sys
 import json
 import logging
@@ -161,6 +166,11 @@ def distill_model(args):
     )
     from datasets import Dataset
     
+    # Completely disable MPS backend
+    if hasattr(torch.backends, 'mps'):
+        torch.backends.mps.is_available = lambda: False
+        torch.backends.mps.is_built = lambda: False
+    
     logger.info("Starting knowledge distillation process...")
     
     # Create output directory
@@ -200,13 +210,12 @@ def distill_model(args):
     )
     tokenizer = AutoTokenizer.from_pretrained(teacher_data['model_name'])
     
-    # Determine the best device to use
-    if torch.cuda.is_available():
-        device = torch.device("cuda")
-        logger.info("Using CUDA device")
-    else:
-        device = torch.device("cpu")
-        logger.info("Using CPU device")
+    # Force CPU usage to avoid MPS issues on macOS and ensure compatibility
+    os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = ""
+    
+    device = torch.device("cpu")
+    logger.info("Using CPU device (forced for compatibility)")
     
     teacher_model = teacher_model.to(device)
     

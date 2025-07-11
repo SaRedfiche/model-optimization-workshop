@@ -214,27 +214,64 @@ def launch_distillation_jobs(processor, config_files, distillable_models, studen
     return job_names, job_output_paths
 
 def monitor_jobs(job_names):
-    """Monitor the status of distillation jobs."""
+    """Monitor the status of distillation jobs with continuous polling until completion."""
     if not job_names:
         print("No jobs to monitor.")
         return
     
     print(f"\n📊 Monitoring {len(job_names)} distillation jobs...")
+    print("Jobs will be monitored until completion. This may take several minutes.")
     
     sagemaker_client = boto3.client('sagemaker')
     
-    for job_name in job_names:
-        try:
-            response = sagemaker_client.describe_processing_job(ProcessingJobName=job_name)
-            status = response['ProcessingJobStatus']
-            print(f"  {job_name}: {status}")
+    # Keep track of job statuses
+    job_statuses = {job_name: 'InProgress' for job_name in job_names}
+    completed_statuses = {'Completed', 'Failed', 'Stopped'}
+    
+    # Monitor jobs until all are complete
+    while True:
+        all_complete = True
+        
+        for job_name in job_names:
+            if job_statuses[job_name] not in completed_statuses:
+                try:
+                    response = sagemaker_client.describe_processing_job(ProcessingJobName=job_name)
+                    current_status = response['ProcessingJobStatus']
+                    
+                    # Update status if it changed
+                    if job_statuses[job_name] != current_status:
+                        job_statuses[job_name] = current_status
+                        print(f"  {job_name}: {current_status}")
+                        
+                        if current_status == 'Failed':
+                            failure_reason = response.get('FailureReason', 'No failure reason provided')
+                            print(f"    Failure reason: {failure_reason}")
+                        elif current_status == 'Completed':
+                            print(f"    ✅ Job completed successfully!")
+                    
+                    # Check if this job is still running
+                    if current_status not in completed_statuses:
+                        all_complete = False
+                        
+                except Exception as e:
+                    print(f"  Error checking {job_name}: {e}")
+                    # Assume job is still running if we can't check it
+                    all_complete = False
             
-            if status == 'Failed':
-                failure_reason = response.get('FailureReason', 'No failure reason provided')
-                print(f"    Failure reason: {failure_reason}")
-                
-        except Exception as e:
-            print(f"  Error checking {job_name}: {e}")
+        # If all jobs are complete, break the loop
+        if all_complete:
+            print("\n🎉 All distillation jobs have completed!")
+            break
+        
+        # Wait before checking again
+        print(f"\nChecking again in 30 seconds...")
+        time.sleep(30)
+        
+        # Show current status of all jobs
+        print(f"📊 Current status of {len(job_names)} jobs:")
+        for job_name, status in job_statuses.items():
+            print(f"  {job_name}: {status}")
+        print("Waiting for jobs to complete...")
 
 def analyze_results(job_output_paths, workshop_config):
     """Analyze distillation results from S3."""
