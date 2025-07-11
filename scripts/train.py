@@ -78,23 +78,72 @@ def load_dataset_from_directory(data_dir):
     except Exception as e:
         logger.warning(f"load_from_disk failed: {e}")
     
-    # Try loading Arrow files directly
+    # Try loading Arrow files directly using datasets library's Arrow format
     try:
         arrow_files = [f for f in os.listdir(data_dir) if f.endswith('.arrow')]
         if arrow_files:
             logger.info(f"Found Arrow files: {arrow_files}")
-            # Load the arrow file directly
-            dataset = Dataset.from_file(os.path.join(data_dir, arrow_files[0]))
-            logger.info(f"Successfully loaded dataset from Arrow file")
-            return dataset
+            
+            # Use datasets library's Arrow reader which handles the specific format
+            from datasets.arrow_dataset import Dataset as ArrowDataset
+            import pyarrow as pa
+            
+            arrow_path = os.path.join(data_dir, arrow_files[0])
+            logger.info(f"Reading Arrow file: {arrow_path}")
+            
+            # Try different Arrow reading approaches
+            try:
+                # Method 1: Use datasets library's direct Arrow loading
+                dataset = ArrowDataset.from_file(arrow_path)
+                logger.info(f"Successfully loaded dataset using Dataset.from_file")
+                return dataset
+            except Exception as e1:
+                logger.warning(f"Dataset.from_file failed: {e1}")
+                
+                # Method 2: Try reading as memory-mapped file with different format
+                try:
+                    import pyarrow.dataset as ds
+                    arrow_dataset = ds.dataset(arrow_path, format='arrow')
+                    table = arrow_dataset.to_table()
+                    df = table.to_pandas()
+                    logger.info(f"Loaded {len(df)} rows from Arrow file via pyarrow.dataset")
+                    logger.info(f"Columns: {list(df.columns)}")
+                    
+                    # Convert to HuggingFace dataset
+                    dataset = Dataset.from_pandas(df)
+                    logger.info(f"Successfully loaded dataset from Arrow file")
+                    return dataset
+                except Exception as e2:
+                    logger.warning(f"pyarrow.dataset failed: {e2}")
+                    
+                    # Method 3: Try reading as IPC stream format
+                    try:
+                        with open(arrow_path, 'rb') as f:
+                            with pa.ipc.open_stream(f) as reader:
+                                table = reader.read_all()
+                                df = table.to_pandas()
+                                logger.info(f"Loaded {len(df)} rows from Arrow stream")
+                                logger.info(f"Columns: {list(df.columns)}")
+                                
+                                # Convert to HuggingFace dataset
+                                dataset = Dataset.from_pandas(df)
+                                logger.info(f"Successfully loaded dataset from Arrow stream")
+                                return dataset
+                    except Exception as e3:
+                        logger.warning(f"Arrow stream reading failed: {e3}")
+                        raise e3
     except Exception as e:
         logger.warning(f"Arrow file loading failed: {e}")
+        import traceback
+        logger.warning(f"Arrow loading traceback: {traceback.format_exc()}")
     
-    # Try loading JSON files
+    # Try loading data JSON files (not metadata JSON)
     try:
-        json_files = [f for f in os.listdir(data_dir) if f.endswith('.json')]
+        # Look for actual data JSON files, not metadata
+        json_files = [f for f in os.listdir(data_dir) 
+                     if f.endswith('.json') and f not in ['dataset_info.json', 'state.json']]
         if json_files:
-            logger.info(f"Found JSON files: {json_files}")
+            logger.info(f"Found data JSON files: {json_files}")
             import json
             with open(os.path.join(data_dir, json_files[0]), 'r') as f:
                 data = json.load(f)
