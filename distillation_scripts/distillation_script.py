@@ -262,7 +262,7 @@ def distill_model(args):
         per_device_train_batch_size=args.batch_size,
         logging_steps=10,
         save_steps=500,
-        evaluation_strategy="no",
+        eval_strategy="no",
         save_strategy="epoch",
         load_best_model_at_end=False,
         report_to=None,  # Disable wandb/tensorboard
