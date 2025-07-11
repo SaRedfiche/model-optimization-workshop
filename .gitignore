@@ -136,3 +136,6 @@ logs/
 temp/
 tmp/
 data/
+
+# Test files
+tests/
