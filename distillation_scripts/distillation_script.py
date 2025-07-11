@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Knowledge Distillation script for SageMaker Processing Jobs.
-This script performs knowledge distillation to create smaller student models.
+Simplified Knowledge Distillation script for SageMaker Processing Jobs.
+This version focuses on core functionality and robust error handling.
 """
 
 # Force CPU usage at the very beginning to avoid MPS issues
@@ -10,121 +10,133 @@ os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 os.environ["CUDA_VISIBLE_DEVICES"] = ""
 os.environ["PYTORCH_MPS_HIGH_WATERMARK_RATIO"] = "0.0"
 
-import argparse
 import sys
 import json
 import logging
-import shutil
-from pathlib import Path
+import argparse
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-def parse_args():
-    """Parse command line arguments."""
-    parser = argparse.ArgumentParser(description='Perform knowledge distillation')
-    parser.add_argument('--teacher-info-path', type=str, required=True,
-                       help='Path to teacher model info JSON file')
-    parser.add_argument('--student-info-path', type=str, required=True,
-                       help='Path to student architecture info JSON file')
-    parser.add_argument('--output-dir', type=str, default='/opt/ml/processing/output',
-                       help='Output directory for the distilled model')
-    parser.add_argument('--temperature', type=float, default=2.0,
-                       help='Temperature for softening teacher outputs')
-    parser.add_argument('--alpha', type=float, default=0.5,
-                       help='Weight for distillation loss vs. task loss')
-    parser.add_argument('--epochs', type=int, default=3,
-                       help='Number of training epochs')
-    parser.add_argument('--batch-size', type=int, default=16,
-                       help='Batch size for training')
-    
-    return parser.parse_args()
-
-def install_dependencies():
-    """Install required dependencies."""
-    logger.info("Installing required dependencies...")
-    
-    # Install from requirements file with Python 3.10 compatible versions
-    script_dir = os.path.dirname(os.path.abspath(__file__))
-    requirements_file = os.path.join(script_dir, "distillation_requirements.txt")
-    
-    if os.path.exists(requirements_file):
-        logger.info(f"Installing from {requirements_file}")
-        os.system(f"pip install -r {requirements_file}")
-    else:
-        # Fallback to specific versions if requirements file not found
-        logger.info("Requirements file not found, installing specific versions...")
-        os.system("pip install 'torch>=2.4.0,<3.0.0' 'transformers>=4.44.0,<5.0.0' 'datasets>=2.20.0,<3.0.0' 'accelerate>=0.33.0,<1.0.0' 'evaluate>=0.4.0,<1.0.0'")
-    
-    logger.info("Dependencies installed successfully")
-
-def load_model_info(info_path):
-    """Load model information from JSON file."""
-    with open(info_path, 'r') as f:
-        return json.load(f)
-
-def create_student_model(student_config, teacher_model):
-    """Create a student model based on the configuration."""
+def main():
+    """Main function with comprehensive error handling."""
     try:
-        from transformers import AutoConfig, AutoModelForSequenceClassification
+        logger.info("=== Starting Knowledge Distillation Process ===")
         
-        # Get teacher model configuration
-        teacher_config = teacher_model.config
+        # Parse arguments
+        parser = argparse.ArgumentParser(description='Perform knowledge distillation')
+        parser.add_argument('--teacher-info-path', type=str, required=True)
+        parser.add_argument('--student-info-path', type=str, required=True)
+        parser.add_argument('--output-dir', type=str, default='/opt/ml/processing/output')
+        parser.add_argument('--temperature', type=float, default=2.0)
+        parser.add_argument('--alpha', type=float, default=0.5)
+        parser.add_argument('--epochs', type=int, default=1)
+        parser.add_argument('--batch-size', type=int, default=8)
         
-        # Create student configuration based on teacher
-        if student_config['model_name'] == 'distilbert-base-uncased':
-            from transformers import DistilBertConfig
-            
-            config = DistilBertConfig(
-                vocab_size=teacher_config.vocab_size,
-                max_position_embeddings=getattr(teacher_config, 'max_position_embeddings', 512),
-                sinusoidal_pos_embds=False,
-                n_layers=student_config.get('num_hidden_layers', 3),
-                n_heads=8,
-                dim=student_config.get('hidden_size', 384),
-                hidden_dim=student_config.get('hidden_size', 384) * 4,
-                dropout=0.1,
-                attention_dropout=0.1,
-                activation='gelu',
-                initializer_range=0.02,
-                qa_dropout=0.1,
-                seq_classif_dropout=0.2,
-                num_labels=teacher_config.num_labels,
-                id2label=teacher_config.id2label,
-                label2id=teacher_config.label2id
-            )
-        else:
-            # Generic configuration
-            config = AutoConfig.from_pretrained(
-                student_config['model_name'],
-                num_labels=teacher_config.num_labels,
-                id2label=teacher_config.id2label,
-                label2id=teacher_config.label2id
-            )
-            
-            # Modify architecture
-            if hasattr(config, 'num_hidden_layers'):
-                config.num_hidden_layers = student_config.get('num_hidden_layers', 3)
-            if hasattr(config, 'hidden_size'):
-                config.hidden_size = student_config.get('hidden_size', 384)
+        args = parser.parse_args()
         
-        # Create student model
-        student_model = AutoModelForSequenceClassification.from_config(config)
+        logger.info(f"Arguments: {vars(args)}")
         
-        logger.info(f"Created student model with {sum(p.numel() for p in student_model.parameters())} parameters")
-        return student_model
+        # Create output directory
+        os.makedirs(args.output_dir, exist_ok=True)
+        logger.info(f"Created output directory: {args.output_dir}")
         
-    except Exception as e:
-        logger.error(f"Error creating student model: {e}")
-        raise
-
-def create_synthetic_dataset():
-    """Create a synthetic dataset for distillation."""
-    try:
+        # Check input files
+        if not os.path.exists(args.teacher_info_path):
+            raise FileNotFoundError(f"Teacher info file not found: {args.teacher_info_path}")
+        if not os.path.exists(args.student_info_path):
+            raise FileNotFoundError(f"Student info file not found: {args.student_info_path}")
+        
+        logger.info("Input files validated successfully")
+        
+        # Load configurations
+        with open(args.teacher_info_path, 'r') as f:
+            teacher_info = json.load(f)
+        with open(args.student_info_path, 'r') as f:
+            student_info = json.load(f)
+        
+        logger.info(f"Loaded teacher info: {list(teacher_info.keys())}")
+        logger.info(f"Loaded student info: {list(student_info.keys())}")
+        
+        # Install dependencies
+        logger.info("Installing dependencies...")
+        os.system("pip install --quiet torch transformers datasets accelerate")
+        
+        # Import after installation
+        import torch
+        import torch.nn.functional as F
+        from transformers import (
+            AutoModelForSequenceClassification, 
+            AutoTokenizer, 
+            AutoConfig,
+            DistilBertConfig,
+            Trainer, 
+            TrainingArguments,
+            DataCollatorWithPadding
+        )
         from datasets import Dataset
         
-        # Create synthetic text data for sentiment analysis
+        # Completely disable MPS backend
+        if hasattr(torch.backends, 'mps'):
+            torch.backends.mps.is_available = lambda: False
+            torch.backends.mps.is_built = lambda: False
+        
+        logger.info("Dependencies imported successfully")
+        
+        # Force CPU usage
+        device = torch.device("cpu")
+        logger.info(f"Using device: {device}")
+        
+        # Get model info
+        teacher_key = list(teacher_info.keys())[0]
+        student_key = list(student_info.keys())[0]
+        teacher_data = teacher_info[teacher_key]
+        student_config = student_info[student_key]
+        
+        logger.info(f"Teacher model: {teacher_data['model_name']}")
+        logger.info(f"Student config: {student_config}")
+        
+        # Load teacher model
+        logger.info("Loading teacher model...")
+        teacher_model = AutoModelForSequenceClassification.from_pretrained(
+            teacher_data['model_name']
+        ).to(device)
+        tokenizer = AutoTokenizer.from_pretrained(teacher_data['model_name'])
+        
+        # Create student model
+        logger.info("Creating student model...")
+        teacher_config = teacher_model.config
+        
+        config = DistilBertConfig(
+            vocab_size=teacher_config.vocab_size,
+            max_position_embeddings=512,
+            sinusoidal_pos_embds=False,
+            n_layers=student_config.get('num_hidden_layers', 3),
+            n_heads=8,
+            dim=student_config.get('hidden_size', 384),
+            hidden_dim=student_config.get('hidden_size', 384) * 4,
+            dropout=0.1,
+            attention_dropout=0.1,
+            activation='gelu',
+            initializer_range=0.02,
+            qa_dropout=0.1,
+            seq_classif_dropout=0.2,
+            num_labels=teacher_config.num_labels,
+            id2label=teacher_config.id2label,
+            label2id=teacher_config.label2id
+        )
+        
+        student_model = AutoModelForSequenceClassification.from_config(config).to(device)
+        
+        teacher_params = sum(p.numel() for p in teacher_model.parameters())
+        student_params = sum(p.numel() for p in student_model.parameters())
+        
+        logger.info(f"Teacher parameters: {teacher_params:,}")
+        logger.info(f"Student parameters: {student_params:,}")
+        
+        # Create simple dataset
+        logger.info("Creating training dataset...")
         texts = [
             "I love this movie, it's fantastic!",
             "This is the worst film I've ever seen.",
@@ -132,236 +144,113 @@ def create_synthetic_dataset():
             "Amazing acting and great storyline!",
             "I didn't like it at all.",
             "Pretty good movie, would recommend.",
-            "Terrible plot and bad acting.",
-            "One of the best movies ever made!",
-            "Not worth watching, very boring.",
-            "Excellent cinematography and direction.",
-        ] * 100  # Repeat to create more data
+        ] * 50  # Small dataset for quick training
         
-        # Create labels (not used in distillation, but needed for dataset format)
-        labels = [1, 0, 1, 1, 0, 1, 0, 1, 0, 1] * 100
+        labels = [1, 0, 1, 1, 0, 1] * 50
         
-        dataset = Dataset.from_dict({
-            'text': texts,
-            'labels': labels
-        })
+        dataset = Dataset.from_dict({'text': texts, 'labels': labels})
         
-        logger.info(f"Created synthetic dataset with {len(dataset)} examples")
-        return dataset
+        def tokenize_function(examples):
+            return tokenizer(examples['text'], truncation=True, padding=True, max_length=128)
+        
+        tokenized_dataset = dataset.map(tokenize_function, batched=True)
+        
+        # Custom trainer
+        class SimpleDistillationTrainer(Trainer):
+            def __init__(self, teacher_model, temperature, alpha, *args, **kwargs):
+                super().__init__(*args, **kwargs)
+                self.teacher_model = teacher_model
+                self.temperature = temperature
+                self.alpha = alpha
+                self.teacher_model.eval()
+            
+            def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
+                student_outputs = model(**inputs)
+                student_logits = student_outputs.logits
+                
+                with torch.no_grad():
+                    teacher_outputs = self.teacher_model(**inputs)
+                    teacher_logits = teacher_outputs.logits
+                
+                # Distillation loss
+                distillation_loss = F.kl_div(
+                    F.log_softmax(student_logits / self.temperature, dim=-1),
+                    F.softmax(teacher_logits / self.temperature, dim=-1),
+                    reduction='batchmean'
+                ) * (self.temperature ** 2)
+                
+                # Task loss
+                task_loss = F.cross_entropy(student_logits, inputs['labels'])
+                
+                # Combined loss
+                loss = self.alpha * distillation_loss + (1 - self.alpha) * task_loss
+                
+                return (loss, student_outputs) if return_outputs else loss
+        
+        # Training arguments
+        training_args = TrainingArguments(
+            output_dir=os.path.join(args.output_dir, "temp"),
+            num_train_epochs=args.epochs,
+            per_device_train_batch_size=args.batch_size,
+            logging_steps=10,
+            save_steps=1000,
+            eval_strategy="no",
+            save_strategy="no",
+            report_to=None,
+            use_mps_device=False,
+            dataloader_pin_memory=False,
+        )
+        
+        # Create trainer
+        trainer = SimpleDistillationTrainer(
+            teacher_model=teacher_model,
+            temperature=args.temperature,
+            alpha=args.alpha,
+            model=student_model,
+            args=training_args,
+            train_dataset=tokenized_dataset,
+            tokenizer=tokenizer,
+            data_collator=DataCollatorWithPadding(tokenizer=tokenizer),
+        )
+        
+        # Train
+        logger.info("Starting training...")
+        trainer.train()
+        
+        # Save model
+        logger.info("Saving model...")
+        student_model.save_pretrained(args.output_dir)
+        tokenizer.save_pretrained(args.output_dir)
+        
+        # Save info
+        size_reduction = (teacher_params - student_params) / teacher_params * 100
+        
+        model_info = {
+            "teacher_model": teacher_data['model_name'],
+            "student_config": student_config,
+            "temperature": args.temperature,
+            "alpha": args.alpha,
+            "epochs": args.epochs,
+            "batch_size": args.batch_size,
+            "teacher_parameters": teacher_params,
+            "student_parameters": student_params,
+            "size_reduction_percent": size_reduction,
+            "distilled_model_path": args.output_dir
+        }
+        
+        with open(os.path.join(args.output_dir, "distillation_info.json"), "w") as f:
+            json.dump(model_info, f, indent=2)
+        
+        logger.info(f"=== Distillation completed successfully! ===")
+        logger.info(f"Size reduction: {size_reduction:.2f}%")
+        logger.info(f"Output saved to: {args.output_dir}")
         
     except Exception as e:
-        logger.error(f"Error creating synthetic dataset: {e}")
-        raise
-
-def distill_model(args):
-    """Perform knowledge distillation."""
-    import torch
-    import torch.nn.functional as F
-    from transformers import (
-        AutoModelForSequenceClassification, 
-        AutoTokenizer, 
-        Trainer, 
-        TrainingArguments,
-        DataCollatorWithPadding
-    )
-    from datasets import Dataset
-    
-    # Completely disable MPS backend
-    if hasattr(torch.backends, 'mps'):
-        torch.backends.mps.is_available = lambda: False
-        torch.backends.mps.is_built = lambda: False
-    
-    logger.info("Starting knowledge distillation process...")
-    
-    # Create output directory
-    os.makedirs(args.output_dir, exist_ok=True)
-    
-    # Validate input files exist
-    if not os.path.exists(args.teacher_info_path):
-        raise FileNotFoundError(f"Teacher info file does not exist: {args.teacher_info_path}")
-    
-    if not os.path.exists(args.student_info_path):
-        raise FileNotFoundError(f"Student info file does not exist: {args.student_info_path}")
-    
-    # Load model information
-    teacher_info = load_model_info(args.teacher_info_path)
-    student_info = load_model_info(args.student_info_path)
-    
-    if not teacher_info:
-        raise ValueError(f"No teacher model information found in {args.teacher_info_path}")
-    
-    if not student_info:
-        raise ValueError(f"No student model information found in {args.student_info_path}")
-    
-    # Get the first (and likely only) model from each info file
-    teacher_key = list(teacher_info.keys())[0]
-    student_key = list(student_info.keys())[0]
-    
-    teacher_data = teacher_info[teacher_key]
-    student_config = student_info[student_key]
-    
-    logger.info(f"Teacher model: {teacher_data['model_name']}")
-    logger.info(f"Student architecture: {student_config}")
-    
-    # Load teacher model and tokenizer - fail if this doesn't work
-    logger.info("Loading teacher model...")
-    teacher_model = AutoModelForSequenceClassification.from_pretrained(
-        teacher_data['model_name']
-    )
-    tokenizer = AutoTokenizer.from_pretrained(teacher_data['model_name'])
-    
-    # Force CPU usage to avoid MPS issues on macOS and ensure compatibility
-    os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
-    os.environ["CUDA_VISIBLE_DEVICES"] = ""
-    
-    device = torch.device("cpu")
-    logger.info("Using CPU device (forced for compatibility)")
-    
-    teacher_model = teacher_model.to(device)
-    
-    # Create student model
-    logger.info("Creating student model...")
-    student_model = create_student_model(student_config, teacher_model)
-    student_model = student_model.to(device)
-    
-    # Create synthetic dataset
-    logger.info("Creating training dataset...")
-    dataset = create_synthetic_dataset()
-    
-    # Tokenize dataset
-    def tokenize_function(examples):
-        return tokenizer(
-            examples['text'], 
-            truncation=True, 
-            padding=True, 
-            max_length=512
-        )
-    
-    tokenized_dataset = dataset.map(tokenize_function, batched=True)
-    
-    # Custom trainer for distillation
-    class DistillationTrainer(Trainer):
-        def __init__(self, teacher_model, temperature, alpha, *args, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.teacher_model = teacher_model
-            self.temperature = temperature
-            self.alpha = alpha
-            self.teacher_model.eval()
-        
-        def compute_loss(self, model, inputs, return_outputs=False, **kwargs):
-            # Get student outputs
-            student_outputs = model(**inputs)
-            student_logits = student_outputs.logits
-            
-            # Get teacher outputs
-            with torch.no_grad():
-                teacher_outputs = self.teacher_model(**inputs)
-                teacher_logits = teacher_outputs.logits
-            
-            # Compute distillation loss
-            distillation_loss = F.kl_div(
-                F.log_softmax(student_logits / self.temperature, dim=-1),
-                F.softmax(teacher_logits / self.temperature, dim=-1),
-                reduction='batchmean'
-            ) * (self.temperature ** 2)
-            
-            # Compute task loss (if labels are available)
-            task_loss = 0
-            if 'labels' in inputs:
-                task_loss = F.cross_entropy(student_logits, inputs['labels'])
-            
-            # Combined loss
-            loss = self.alpha * distillation_loss + (1 - self.alpha) * task_loss
-            
-            return (loss, student_outputs) if return_outputs else loss
-    
-    # Set up training arguments
-    training_args = TrainingArguments(
-        output_dir=os.path.join(args.output_dir, "training_output"),
-        num_train_epochs=args.epochs,
-        per_device_train_batch_size=args.batch_size,
-        logging_steps=10,
-        save_steps=500,
-        eval_strategy="no",
-        save_strategy="epoch",
-        load_best_model_at_end=False,
-        report_to=None,  # Disable wandb/tensorboard
-        use_mps_device=False,  # Disable MPS to avoid issues on macOS
-        dataloader_pin_memory=False,  # Disable pin memory for compatibility
-    )
-    
-    # Create data collator
-    data_collator = DataCollatorWithPadding(tokenizer=tokenizer)
-    
-    # Create trainer
-    trainer = DistillationTrainer(
-        teacher_model=teacher_model,
-        temperature=args.temperature,
-        alpha=args.alpha,
-        model=student_model,
-        args=training_args,
-        train_dataset=tokenized_dataset,
-        tokenizer=tokenizer,
-        data_collator=data_collator,
-    )
-    
-    # Train the student model
-    logger.info("Starting distillation training...")
-    trainer.train()
-    
-    # Save the distilled model directly to output directory (flatten structure)
-    logger.info("Saving distilled model...")
-    student_model.save_pretrained(args.output_dir)
-    tokenizer.save_pretrained(args.output_dir)
-    
-    # Calculate model sizes
-    teacher_params = sum(p.numel() for p in teacher_model.parameters())
-    student_params = sum(p.numel() for p in student_model.parameters())
-    size_reduction = (teacher_params - student_params) / teacher_params * 100
-    
-    # Create model info file
-    model_info = {
-        "teacher_model": teacher_data['model_name'],
-        "student_config": student_config,
-        "temperature": args.temperature,
-        "alpha": args.alpha,
-        "epochs": args.epochs,
-        "batch_size": args.batch_size,
-        "teacher_parameters": teacher_params,
-        "student_parameters": student_params,
-        "size_reduction_percent": size_reduction,
-        "distilled_model_path": args.output_dir
-    }
-    
-    with open(os.path.join(args.output_dir, "distillation_info.json"), "w") as f:
-        json.dump(model_info, f, indent=2)
-    
-    logger.info(f"Distillation completed successfully!")
-    logger.info(f"Teacher parameters: {teacher_params:,}")
-    logger.info(f"Student parameters: {student_params:,}")
-    logger.info(f"Size reduction: {size_reduction:.2f}%")
-    logger.info(f"Output saved to: {args.output_dir}")
-
-def main():
-    """Main function."""
-    args = parse_args()
-    
-    logger.info("Starting knowledge distillation process...")
-    logger.info(f"Teacher info path: {args.teacher_info_path}")
-    logger.info(f"Student info path: {args.student_info_path}")
-    logger.info(f"Output directory: {args.output_dir}")
-    logger.info(f"Temperature: {args.temperature}")
-    logger.info(f"Alpha: {args.alpha}")
-    logger.info(f"Epochs: {args.epochs}")
-    logger.info(f"Batch size: {args.batch_size}")
-    
-    # Install dependencies
-    install_dependencies()
-    
-    # Perform distillation
-    distill_model(args)
-    
-    logger.info("Knowledge distillation process completed successfully!")
+        logger.error(f"=== DISTILLATION FAILED ===")
+        logger.error(f"Error: {str(e)}")
+        import traceback
+        logger.error(f"Traceback: {traceback.format_exc()}")
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
