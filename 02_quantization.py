@@ -92,10 +92,10 @@ def run_quantization_processing_job(config, model_name, model_s3_uri):
     try:
         sagemaker_session = sagemaker.Session()
         
-        # Configure the processing job with updated Python version
+        # Configure the processing job with updated versions
         processor = PyTorchProcessor(
-            framework_version='2.4.0',
-            py_version='py311',  # Updated to supported version
+            framework_version='2.6.0',
+            py_version='py312',  # Updated to supported version
             role=SAGEMAKER_ROLE_ARN,
             instance_count=1,
             instance_type=OPTIMIZATION_INSTANCE_TYPE,

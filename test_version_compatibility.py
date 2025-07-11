@@ -81,22 +81,22 @@ def test_sagemaker_versions():
         
         print(f"✅ SageMaker SDK version: {sagemaker.__version__}")
         
-        # Test that we can create processors with py311
+        # Test that we can create processors with py312 (processing jobs now use py312)
         try:
             # This won't actually create a processor (no role), but will validate the API
             processor_args = {
-                'framework_version': '2.4.0',
-                'py_version': 'py311',
+                'framework_version': '2.6.0',
+                'py_version': 'py312',
                 'role': 'arn:aws:iam::123456789012:role/test',
                 'instance_count': 1,
                 'instance_type': 'ml.c5.xlarge'
             }
-            print("✅ PyTorchProcessor with py311 is supported")
+            print("✅ PyTorchProcessor with py312 is supported")
         except Exception as e:
-            print(f"❌ PyTorchProcessor py311 test failed: {e}")
+            print(f"❌ PyTorchProcessor py312 test failed: {e}")
             return False
         
-        # Test HuggingFace estimator versions
+        # Test HuggingFace estimator versions (model deployment uses py312)
         try:
             hf_args = {
                 'entry_point': 'train.py',
@@ -104,7 +104,7 @@ def test_sagemaker_versions():
                 'instance_type': 'ml.g4dn.xlarge',
                 'transformers_version': '4.49.0',
                 'pytorch_version': '2.6.0',
-                'py_version': 'py311'
+                'py_version': 'py312'
             }
             print("✅ HuggingFace estimator with supported versions is supported")
         except Exception as e:

@@ -367,7 +367,7 @@ def main():
         role=role,
         transformers_version='4.49.0',
         pytorch_version='2.6.0',
-        py_version='py311',
+        py_version='py312',
         hyperparameters=hyperparameters,
         metric_definitions=metric_definitions,
         output_path=output_path
