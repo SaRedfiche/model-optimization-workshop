@@ -64,6 +64,51 @@ def parse_args():
     args, _ = parser.parse_known_args()
     return args
 
+def load_dataset_from_directory(data_dir):
+    """
+    Load dataset from directory, handling various formats.
+    """
+    logger.info(f"Loading dataset from {data_dir}")
+    
+    # First try load_from_disk
+    try:
+        dataset = load_from_disk(data_dir)
+        logger.info(f"Successfully loaded dataset using load_from_disk")
+        return dataset
+    except Exception as e:
+        logger.warning(f"load_from_disk failed: {e}")
+    
+    # Try loading Arrow files directly
+    try:
+        arrow_files = [f for f in os.listdir(data_dir) if f.endswith('.arrow')]
+        if arrow_files:
+            logger.info(f"Found Arrow files: {arrow_files}")
+            # Load the arrow file directly
+            dataset = Dataset.from_file(os.path.join(data_dir, arrow_files[0]))
+            logger.info(f"Successfully loaded dataset from Arrow file")
+            return dataset
+    except Exception as e:
+        logger.warning(f"Arrow file loading failed: {e}")
+    
+    # Try loading JSON files
+    try:
+        json_files = [f for f in os.listdir(data_dir) if f.endswith('.json')]
+        if json_files:
+            logger.info(f"Found JSON files: {json_files}")
+            import json
+            with open(os.path.join(data_dir, json_files[0]), 'r') as f:
+                data = json.load(f)
+            if isinstance(data, list) and len(data) > 0:
+                dataset = Dataset.from_list(data)
+                logger.info(f"Successfully loaded dataset from JSON file")
+                return dataset
+    except Exception as e:
+        logger.warning(f"JSON file loading failed: {e}")
+    
+    # If all methods fail, raise an error
+    files = os.listdir(data_dir)
+    raise ValueError(f"Could not load dataset from {data_dir}. Found files: {files}")
+
 def main():
     """
     Main training function.
@@ -72,36 +117,22 @@ def main():
     
     # Load datasets
     logger.info(f"Loading datasets from {args.training_dir} and {args.validation_dir}")
+    
     try:
-        train_dataset = load_from_disk(args.training_dir)
-        validation_dataset = load_from_disk(args.validation_dir)
+        train_dataset = load_dataset_from_directory(args.training_dir)
+        validation_dataset = load_dataset_from_directory(args.validation_dir)
     except Exception as e:
-        logger.error(f"Error loading datasets with load_from_disk: {e}")
-        logger.info("Attempting to load datasets as individual files...")
-        
-        # Try loading as individual files if load_from_disk fails
-        import json
-        
-        # Load training data
-        train_files = [f for f in os.listdir(args.training_dir) if f.endswith('.json')]
-        if train_files:
-            with open(os.path.join(args.training_dir, train_files[0]), 'r') as f:
-                train_data = json.load(f)
-            train_dataset = Dataset.from_list(train_data)
-        else:
-            raise ValueError(f"No JSON files found in {args.training_dir}")
-        
-        # Load validation data
-        val_files = [f for f in os.listdir(args.validation_dir) if f.endswith('.json')]
-        if val_files:
-            with open(os.path.join(args.validation_dir, val_files[0]), 'r') as f:
-                val_data = json.load(f)
-            validation_dataset = Dataset.from_list(val_data)
-        else:
-            raise ValueError(f"No JSON files found in {args.validation_dir}")
+        logger.error(f"Failed to load datasets: {e}")
+        raise
     
     logger.info(f"Train dataset size: {len(train_dataset)}")
     logger.info(f"Validation dataset size: {len(validation_dataset)}")
+    
+    # Print dataset info for debugging
+    logger.info(f"Train dataset columns: {train_dataset.column_names}")
+    logger.info(f"Train dataset features: {train_dataset.features}")
+    if len(train_dataset) > 0:
+        logger.info(f"Sample train data: {train_dataset[0]}")
     
     # Load tokenizer and model
     logger.info(f"Loading model and tokenizer for {args.model_name}")
@@ -109,9 +140,16 @@ def main():
     
     # Get number of unique labels
     try:
-        num_labels = len(train_dataset.unique("labels"))
-    except:
-        # Fallback: assume binary classification
+        if 'labels' in train_dataset.column_names:
+            unique_labels = train_dataset.unique("labels")
+            num_labels = len(unique_labels)
+            logger.info(f"Found {num_labels} unique labels: {unique_labels}")
+        else:
+            # Fallback: assume binary classification
+            num_labels = 2
+            logger.info("No 'labels' column found, assuming binary classification")
+    except Exception as e:
+        logger.warning(f"Could not determine number of labels: {e}, assuming binary classification")
         num_labels = 2
     
     model = AutoModelForSequenceClassification.from_pretrained(
