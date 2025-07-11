@@ -65,6 +65,23 @@ def prune_model(args):
     if not input_path.exists():
         raise FileNotFoundError(f"Input directory does not exist: {args.input_dir}")
     
+    # Check for tar.gz files first (SageMaker format)
+    tar_files = list(input_path.glob("**/*.tar.gz"))
+    if tar_files:
+        import tarfile
+        logger.info(f"Found tar.gz file: {tar_files[0]}")
+        
+        # Extract tar.gz to a temporary directory
+        extract_dir = input_path / "extracted"
+        extract_dir.mkdir(exist_ok=True)
+        
+        with tarfile.open(tar_files[0], "r:gz") as tar:
+            tar.extractall(extract_dir)
+        
+        # Update input_path to the extracted directory
+        input_path = extract_dir
+        logger.info(f"Extracted model to: {input_path}")
+    
     model_files = list(input_path.glob("**/*.bin")) + list(input_path.glob("**/*.safetensors"))
     config_files = list(input_path.glob("**/config.json"))
     
