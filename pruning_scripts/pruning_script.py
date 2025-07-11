@@ -134,12 +134,10 @@ def prune_model(args):
     actual_sparsity = zero_params / total_params
     logger.info(f"Achieved sparsity: {actual_sparsity:.4f}")
     
-    # Save pruned model
-    output_path = os.path.join(args.output_dir, "pruned_model")
-    os.makedirs(output_path, exist_ok=True)
-    
-    model.save_pretrained(output_path)
-    tokenizer.save_pretrained(output_path)
+    # Save pruned model directly to output directory (flatten structure)
+    logger.info("Saving pruned model...")
+    model.save_pretrained(args.output_dir)
+    tokenizer.save_pretrained(args.output_dir)
     
     # Create model info file
     model_info = {
@@ -147,7 +145,7 @@ def prune_model(args):
         "target_sparsity": args.sparsity,
         "actual_sparsity": actual_sparsity,
         "original_model": model_path,
-        "pruned_model_path": output_path,
+        "pruned_model_path": args.output_dir,
         "total_parameters": total_params,
         "zero_parameters": zero_params
     }
@@ -155,7 +153,7 @@ def prune_model(args):
     with open(os.path.join(args.output_dir, "pruning_info.json"), "w") as f:
         json.dump(model_info, f, indent=2)
     
-    logger.info(f"Pruning completed successfully. Output saved to: {output_path}")
+    logger.info(f"Pruning completed successfully. Output saved to: {args.output_dir}")
 
 def main():
     """Main function."""

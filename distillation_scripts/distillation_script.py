@@ -287,12 +287,10 @@ def distill_model(args):
     logger.info("Starting distillation training...")
     trainer.train()
     
-    # Save the distilled model
-    output_path = os.path.join(args.output_dir, "distilled_model")
-    os.makedirs(output_path, exist_ok=True)
-    
-    student_model.save_pretrained(output_path)
-    tokenizer.save_pretrained(output_path)
+    # Save the distilled model directly to output directory (flatten structure)
+    logger.info("Saving distilled model...")
+    student_model.save_pretrained(args.output_dir)
+    tokenizer.save_pretrained(args.output_dir)
     
     # Calculate model sizes
     teacher_params = sum(p.numel() for p in teacher_model.parameters())
@@ -310,7 +308,7 @@ def distill_model(args):
         "teacher_parameters": teacher_params,
         "student_parameters": student_params,
         "size_reduction_percent": size_reduction,
-        "distilled_model_path": output_path
+        "distilled_model_path": args.output_dir
     }
     
     with open(os.path.join(args.output_dir, "distillation_info.json"), "w") as f:
@@ -320,7 +318,7 @@ def distill_model(args):
     logger.info(f"Teacher parameters: {teacher_params:,}")
     logger.info(f"Student parameters: {student_params:,}")
     logger.info(f"Size reduction: {size_reduction:.2f}%")
-    logger.info(f"Output saved to: {output_path}")
+    logger.info(f"Output saved to: {args.output_dir}")
 
 def main():
     """Main function."""
