@@ -55,7 +55,7 @@ def parse_args():
     parser.add_argument(
         "--instance_type",
         type=str,
-        default="ml.g4dn.xlarge",
+        default="ml.g5.2xlarge",
         help="SageMaker instance type for training",
     )
     
